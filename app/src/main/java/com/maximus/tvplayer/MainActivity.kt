@@ -14,8 +14,10 @@ import android.view.Window
 import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -63,6 +65,14 @@ class MainActivity : Activity() {
     private lateinit var actionRow: LinearLayout
     private lateinit var vodCards: LinearLayout
     private lateinit var vodTitle: TextView
+    private lateinit var homePanel: ScrollView
+    private lateinit var homeHeroImage: ImageView
+    private lateinit var homeHeroTitle: TextView
+    private lateinit var homeHeroDescription: TextView
+    private lateinit var homeMoviesCard: FrameLayout
+    private lateinit var homeSeriesCard: FrameLayout
+    private lateinit var homeCartoonsCard: FrameLayout
+    private var homeMode = false
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
@@ -184,6 +194,20 @@ class MainActivity : Activity() {
         actionRow = findViewById(R.id.actionRow)
         vodCards = findViewById(R.id.vodCards)
         vodTitle = findViewById(R.id.vodTitle)
+        homePanel = findViewById(R.id.homePanel)
+        homeHeroImage = findViewById(R.id.homeHeroImage)
+        homeHeroTitle = findViewById(R.id.homeHeroTitle)
+        homeHeroDescription = findViewById(R.id.homeHeroDescription)
+        homeMoviesCard = findViewById(R.id.homeMoviesCard)
+        homeSeriesCard = findViewById(R.id.homeSeriesCard)
+        homeCartoonsCard = findViewById(R.id.homeCartoonsCard)
+        homeMoviesCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
+        homeSeriesCard.setOnClickListener { switchSection(MediaKind.SERIES) }
+        homeCartoonsCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
+        findViewById<View>(R.id.homeNavHome).setOnClickListener { showHome() }
+        findViewById<View>(R.id.homeNavChannels).setOnClickListener { switchSection(MediaKind.LIVE) }
+        findViewById<View>(R.id.homeNavMovies).setOnClickListener { switchSection(MediaKind.MOVIE) }
+        findViewById<View>(R.id.homeNavSeries).setOnClickListener { switchSection(MediaKind.SERIES) }
         searchHint.setOnClickListener { showSearchDialog() }
         findViewById<View>(R.id.videoPreview).isFocusable = true
     }
@@ -227,7 +251,8 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(-1, 64).apply { setMargins(4, 2, 4, 2) }
                 setOnClickListener {
                     when (label) {
-                        "INÍCIO", "CANAIS" -> switchSection(MediaKind.LIVE)
+                        "INÍCIO" -> showHome()
+                        "CANAIS" -> switchSection(MediaKind.LIVE)
                         "FILMES" -> switchSection(MediaKind.MOVIE)
                         "SÉRIES" -> switchSection(MediaKind.SERIES)
                         "FAVORITOS" -> switchFavorites()
@@ -264,13 +289,35 @@ class MainActivity : Activity() {
     }
 
     private fun isNavigationSelected(label: String): Boolean = when {
+        homeMode -> label == "INÍCIO"
         favoritesOnly -> label == "FAVORITOS"
         currentKind == MediaKind.LIVE -> label == "CANAIS" || label == "INÍCIO"
         currentKind == MediaKind.MOVIE -> label == "FILMES"
         else -> label == "SÉRIES"
     }
 
+    private fun showHome() {
+        homeMode = true
+        favoritesOnly = false
+        homePanel.visibility = View.VISIBLE
+        findViewById<View>(R.id.sideNavigation).visibility = View.GONE
+        findViewById<View>(R.id.channelColumn).visibility = View.GONE
+        findViewById<View>(R.id.previewScroll).visibility = View.GONE
+        renderHomeHero()
+    }
+
+    private fun renderHomeHero() {
+        homeHeroImage.setImageResource(R.drawable.excellence_home_hero)
+        homeHeroTitle.text = "Aqui você encontra os melhores canais, filmes e séries"
+        homeHeroDescription.text = "Conteúdos selecionados para você assistir com qualidade e praticidade."
+    }
+
     private fun switchSection(kind: MediaKind) {
+        homeMode = false
+        homePanel.visibility = View.GONE
+        findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
+        findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
+        findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         favoritesOnly = false
         currentKind = kind
         selectedCategory = "Todos"
@@ -288,6 +335,11 @@ class MainActivity : Activity() {
     }
 
     private fun switchFavorites() {
+        homeMode = false
+        homePanel.visibility = View.GONE
+        findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
+        findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
+        findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         favoritesOnly = true
         selectedCategory = "Todos"
         query = ""
