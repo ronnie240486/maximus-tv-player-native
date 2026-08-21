@@ -64,7 +64,7 @@ class MainActivity : Activity() {
     private val epgRepository = EpgRepository()
     private var epgByChannel: Map<String, List<EpgProgram>> = emptyMap()
     private lateinit var catalogAdapter: CatalogAdapter
-    private var catalog = CatalogSnapshot(fallbackCatalog())
+    private var catalog = CatalogSnapshot(emptyList())
     private var selectedEntry: CatalogEntry? = null
     private var selectedCategory = "Todos"
     private var query = ""
@@ -749,14 +749,6 @@ class MainActivity : Activity() {
         currentKind == MediaKind.SERIES -> "Buscar série..."
         else -> "Buscar canal..."
     }
-
-    private fun fallbackCatalog(): List<CatalogEntry> = listOf(
-        CatalogEntry("animal", "Animal Planet", "DOCUMENTÁRIOS", "AnimalPlanet.br", "", "", MediaKind.LIVE, "FHD"),
-        CatalogEntry("discovery", "Discovery Channel", "DOCUMENTÁRIOS", "DiscoveryChannel.br", "", "", MediaKind.LIVE, "FHD"),
-        CatalogEntry("natgeo", "National Geographic", "DOCUMENTÁRIOS", "NationalGeographic.br", "", "", MediaKind.LIVE, "HD"),
-        CatalogEntry("espn", "ESPN Brasil", "ESPN", "ESPN.br", "", "", MediaKind.LIVE, "FHD"),
-        CatalogEntry("cartoon", "Cartoon Network", "INFANTIL", "CartoonNetwork.br", "", "", MediaKind.LIVE, "HD"),
-    )
 
     private fun rounded(color: Long, radius: Float): GradientDrawable = GradientDrawable().apply {
         setColor(Color.argb((color shr 24 and 0xFF).toInt(), (color shr 16 and 0xFF).toInt(), (color shr 8 and 0xFF).toInt(), (color and 0xFF).toInt()))
