@@ -3,6 +3,7 @@ package com.maximus.tvplayer
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.net.Uri
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -52,6 +53,8 @@ class MainActivity : Activity() {
     private lateinit var detailChannelName: TextView
     private lateinit var detailTags: TextView
     private lateinit var detailDescription: TextView
+    private lateinit var aboutLabel: TextView
+    private lateinit var nowLabel: TextView
     private lateinit var currentProgram: TextView
     private lateinit var currentProgramDescription: TextView
     private lateinit var programTime: TextView
@@ -164,12 +167,18 @@ class MainActivity : Activity() {
         detailChannelName = findViewById(R.id.detailChannelName)
         detailTags = findViewById(R.id.detailTags)
         detailDescription = findViewById(R.id.detailDescription)
+        aboutLabel = findViewById(R.id.aboutLabel)
+        nowLabel = findViewById(R.id.nowLabel)
         currentProgram = findViewById(R.id.currentProgram)
         currentProgramDescription = findViewById(R.id.currentProgramDescription)
         programTime = findViewById(R.id.programTime)
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
         searchHint.setOnClickListener { showSearchDialog() }
+        findViewById<View>(R.id.videoPreview).apply {
+            isFocusable = true
+            setOnClickListener { selectedEntry?.let(::openPreview) }
+        }
     }
 
     private fun setupCatalogList() {
@@ -311,21 +320,41 @@ class MainActivity : Activity() {
         selectedEntry = entry
         val editorial = editorialFor(entry)
         val epgProgram = currentEpgProgram(entry)
-        videoPreviewText.text = "Preview • ${entry.name}"
-        if (remoteBannerUrl.isBlank()) {
+        val isLive = entry.kind == MediaKind.LIVE
+        val hasTrailer = entry.trailerUrl.isNotBlank()
+        videoPreviewText.text = when {
+            isLive -> "Preview • ${entry.name}"
+            hasTrailer -> "▶  Trailer • ${entry.name}"
+            else -> "Poster • ${entry.name}"
+        }
+        val heroSource = if (isLive && entry.backdropUrl.isBlank()) "" else entry.backdropUrl.ifBlank { entry.logoUrl }
+        if (heroSource.isBlank()) {
             heroImage.setImageResource(fallbackHero(entry))
         } else {
-            imageLoader.load(remoteBannerUrl, heroImage, fallbackHero(entry))
+            imageLoader.load(heroSource, heroImage, fallbackHero(entry))
         }
-        liveBadge.visibility = if (entry.kind == MediaKind.LIVE) View.VISIBLE else View.GONE
-        detailEyebrow.text = editorial.eyebrow.uppercase()
+        liveBadge.visibility = if (isLive || hasTrailer) View.VISIBLE else View.GONE
+        liveBadge.text = if (isLive) "AO VIVO" else "TRAILER"
+        detailEyebrow.text = if (isLive) editorial.eyebrow.uppercase() else kindLabel(entry.kind)
         detailChannelName.text = entry.name
-        detailTags.text = listOf(entry.groupTitle, entry.quality, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
-        detailDescription.text = editorial.description
-        currentProgram.text = epgProgram?.title ?: editorial.currentProgram
-        currentProgramDescription.text = epgProgram?.description?.ifBlank { null } ?: editorial.currentDescription
-        programTime.text = epgProgram?.let { "${formatTime(it.start)} – ${formatTime(it.stop)}" } ?: editorial.time
-        nextProgram.text = nextEpgProgram(entry)?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
+        detailTags.text = listOf(entry.groupTitle, entry.year, entry.quality, kindLabel(entry.kind), entry.runtime)
+            .filter { it.isNotBlank() }.joinToString("   •   ")
+        aboutLabel.text = if (isLive) "SOBRE O CANAL" else if (entry.kind == MediaKind.MOVIE) "SOBRE O FILME" else "SOBRE A SÉRIE"
+        detailDescription.text = if (isLive) editorial.description else entry.synopsis.ifBlank { "Sinopse não informada na lista do painel." }
+        nowLabel.text = if (isLive) "AGORA" else if (entry.cast.isNotBlank()) "ELENCO" else "DETALHES"
+        currentProgram.text = if (isLive) epgProgram?.title ?: editorial.currentProgram else entry.cast.ifBlank { "Elenco não informado na lista do painel." }
+        currentProgramDescription.text = if (isLive) {
+            epgProgram?.description?.ifBlank { null } ?: editorial.currentDescription
+        } else if (hasTrailer) {
+            "Trailer disponível. Toque no painel grande ou no botão Trailer para assistir."
+        } else {
+            "Selecione o item para assistir ao conteúdo da sua lista."
+        }
+        programTime.text = if (isLive) epgProgram?.let { "${formatTime(it.start)} – ${formatTime(it.stop)}" } ?: editorial.time
+        else listOf(entry.year, entry.runtime).filter { it.isNotBlank() }.joinToString("  •  ").ifBlank { "Informações da lista do painel" }
+        nextProgram.text = if (isLive) {
+            nextEpgProgram(entry)?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
+        } else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
         if (requestFocus) channelList.requestFocus()
         renderCatalog()
@@ -334,7 +363,7 @@ class MainActivity : Activity() {
     private fun renderActions(entry: CatalogEntry) {
         actionRow.removeAllViews()
         val isFavorite = entry.key in favorites()
-        val actions = listOf("▶  Assistir agora", if (isFavorite) "♥  Favorito" else "♡  Favoritar", "⌕  Buscar")
+        val actions = listOf(if (entry.kind != MediaKind.LIVE && entry.trailerUrl.isNotBlank()) "▶  Trailer" else "▶  Assistir agora", if (isFavorite) "♥  Favorito" else "♡  Favoritar", "⌕  Buscar")
         actions.forEachIndexed { index, label ->
             val action = TextView(this).apply {
                 text = label
@@ -351,7 +380,7 @@ class MainActivity : Activity() {
                 }
                 setOnClickListener {
                     when (index) {
-                        0 -> openEntry(entry)
+                        0 -> if (entry.kind != MediaKind.LIVE && entry.trailerUrl.isNotBlank()) openPreview(entry) else openEntry(entry)
                         1 -> {
                             toggleFavorite(entry)
                             renderActions(entry)
@@ -363,6 +392,24 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(-2, 44).apply { setMargins(0, 0, 8, 0) }
             }
             actionRow.addView(action)
+        }
+    }
+
+    private fun openPreview(entry: CatalogEntry) {
+        val trailer = entry.trailerUrl.trim()
+        if (trailer.isBlank()) {
+            val query = Uri.encode("${entry.name} trailer oficial")
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")))
+            return
+        }
+        if (trailer.contains("youtube.com", true) || trailer.contains("youtu.be", true)) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailer)))
+        } else {
+            startActivity(Intent(this, PlayerActivity::class.java).apply {
+                putExtra(PlayerActivity.EXTRA_TITLE, "Trailer • ${entry.name}")
+                putExtra(PlayerActivity.EXTRA_URL, trailer)
+                putExtra(PlayerActivity.EXTRA_MAC, getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
+            })
         }
     }
 

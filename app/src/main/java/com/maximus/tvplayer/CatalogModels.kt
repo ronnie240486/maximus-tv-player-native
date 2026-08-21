@@ -18,6 +18,12 @@ data class CatalogEntry(
     val seriesGroup: String = "",
     val season: String = "",
     val episode: String = "",
+    val year: String = "",
+    val synopsis: String = "",
+    val cast: String = "",
+    val backdropUrl: String = "",
+    val trailerUrl: String = "",
+    val runtime: String = "",
 )
 
 data class CatalogSnapshot(

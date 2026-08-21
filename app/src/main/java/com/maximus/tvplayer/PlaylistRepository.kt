@@ -233,6 +233,12 @@ class PlaylistRepository(private val context: Context) {
         val group = attributes["group-title"].orEmpty().ifBlank { "Sem categoria" }
         val kind = classify(displayName, group)
         val quality = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE).find(displayName)?.value?.uppercase().orEmpty()
+        val synopsis = firstAttribute(attributes, "description", "plot", "synopsis", "summary", "overview")
+        val cast = firstAttribute(attributes, "cast", "actors", "actor")
+        val year = firstAttribute(attributes, "year", "release-year", "release_year", "date")
+        val backdrop = firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "background")
+        val trailer = firstAttribute(attributes, "trailer", "trailer-url", "trailer_url", "youtube-trailer", "youtube_trailer")
+        val runtime = firstAttribute(attributes, "duration", "runtime", "length")
         target += CatalogEntry(
             key = "${attributes["tvg-id"].orEmpty()}|$streamUrl",
             name = displayName,
@@ -243,7 +249,18 @@ class PlaylistRepository(private val context: Context) {
             kind = kind,
             quality = quality,
             seriesGroup = if (kind == MediaKind.SERIES) displayName.split(Regex("\\sS\\d+|\\sTemporada")).first() else "",
+            year = year,
+            synopsis = synopsis,
+            cast = cast,
+            backdropUrl = backdrop,
+            trailerUrl = trailer,
+            runtime = runtime,
         )
+    }
+
+    private fun firstAttribute(attributes: Map<String, String>, vararg keys: String): String {
+        keys.forEach { key -> attributes[key]?.trim()?.takeIf { it.isNotBlank() }?.let { return it } }
+        return ""
     }
 
     private fun classify(name: String, group: String): MediaKind {
@@ -261,7 +278,7 @@ class PlaylistRepository(private val context: Context) {
     private fun writeCache(entries: List<CatalogEntry>) {
         GZIPOutputStream(cacheFile.outputStream().buffered()).bufferedWriter(Charsets.UTF_8).use { writer ->
             entries.forEach { entry ->
-                val fields = listOf(entry.key, entry.name, entry.groupTitle, entry.tvgId, entry.logoUrl, entry.streamUrl, entry.kind.name, entry.quality, entry.seriesGroup)
+                val fields = listOf(entry.key, entry.name, entry.groupTitle, entry.tvgId, entry.logoUrl, entry.streamUrl, entry.kind.name, entry.quality, entry.seriesGroup, entry.season, entry.episode, entry.year, entry.synopsis, entry.cast, entry.backdropUrl, entry.trailerUrl, entry.runtime)
                 writer.append(fields.joinToString("\t") { encode(it) }).append('\n')
             }
         }
@@ -275,7 +292,13 @@ class PlaylistRepository(private val context: Context) {
                 val f = line.split('\t').map(::decode)
                 if (f.size >= 9) {
                     runCatching {
-                        entries += CatalogEntry(f[0], f[1], f[2], f[3], f[4], f[5], MediaKind.valueOf(f[6]), f[7], f[8])
+                        entries += CatalogEntry(
+                            key = f[0], name = f[1], groupTitle = f[2], tvgId = f[3], logoUrl = f[4], streamUrl = f[5],
+                            kind = MediaKind.valueOf(f[6]), quality = f[7], seriesGroup = f[8],
+                            season = f.getOrElse(9) { "" }, episode = f.getOrElse(10) { "" }, year = f.getOrElse(11) { "" },
+                            synopsis = f.getOrElse(12) { "" }, cast = f.getOrElse(13) { "" }, backdropUrl = f.getOrElse(14) { "" },
+                            trailerUrl = f.getOrElse(15) { "" }, runtime = f.getOrElse(16) { "" },
+                        )
                     }
                 }
             }
