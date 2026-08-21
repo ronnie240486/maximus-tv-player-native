@@ -5,18 +5,23 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
+import android.widget.ScrollView
 import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -61,6 +66,11 @@ class MainActivity : Activity() {
     private lateinit var programTime: TextView
     private lateinit var nextProgram: TextView
     private lateinit var actionRow: LinearLayout
+    private lateinit var homePanel: ScrollView
+    private lateinit var previewScroll: ScrollView
+    private lateinit var homeFeaturedCards: LinearLayout
+    private lateinit var homeChannelCards: LinearLayout
+    private lateinit var homeSeriesCards: LinearLayout
     private lateinit var vodCards: LinearLayout
     private lateinit var vodTitle: TextView
 
@@ -81,6 +91,7 @@ class MainActivity : Activity() {
     private var query = ""
     private var favoritesOnly = false
     private var currentKind = MediaKind.LIVE
+    private var homeMode = true
     private var sortAlphabetically = false
     private var remoteBannerUrl = ""
     private var remoteEpgUrl = ""
@@ -149,6 +160,7 @@ class MainActivity : Activity() {
         sortAlphabetically = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_SORT_ALPHA, false)
         bindViews()
         setupCatalogList()
+        showHome()
         renderNavigation()
         renderCategories()
         renderCatalog()
@@ -182,6 +194,11 @@ class MainActivity : Activity() {
         programTime = findViewById(R.id.programTime)
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
+        homePanel = findViewById(R.id.homePanel)
+        previewScroll = findViewById(R.id.previewScroll)
+        homeFeaturedCards = findViewById(R.id.homeFeaturedCards)
+        homeChannelCards = findViewById(R.id.homeChannelCards)
+        homeSeriesCards = findViewById(R.id.homeSeriesCards)
         vodCards = findViewById(R.id.vodCards)
         vodTitle = findViewById(R.id.vodTitle)
         searchHint.setOnClickListener { showSearchDialog() }
@@ -216,65 +233,124 @@ class MainActivity : Activity() {
             "FAVORITOS" to R.drawable.ic_nav_favorites,
             "AJUSTES" to R.drawable.ic_nav_settings,
         )
-        items.forEachIndexed { index, (label, iconRes) ->
-            lateinit var icon: ImageView
-            lateinit var caption: TextView
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
+        items.forEach { (label, iconRes) ->
+            val icon = ImageView(this).apply {
+                setImageResource(iconRes)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setColorFilter(if (isNavigationSelected(label)) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
+                background = getDrawable(R.drawable.nav_icon_bg)
+                contentDescription = label
                 isFocusable = true
                 isClickable = true
-                layoutParams = LinearLayout.LayoutParams(-1, 82).apply { setMargins(2, 5, 2, 5) }
+                layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply { setMargins(dp(4), dp(2), dp(4), dp(2)) }
+                setOnClickListener { showExpandedNavigation() }
+                setOnFocusChangeListener { view, hasFocus ->
+                    view.background = rounded(if (hasFocus || isNavigationSelected(label)) 0x664CE8F0 else 0x331B2036, 18f)
+                    setColorFilter(if (hasFocus || isNavigationSelected(label)) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
+                }
+            }
+            navItems.addView(icon)
+        }
+    }
+
+    private fun showExpandedNavigation() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(22), dp(18), dp(18))
+            background = rounded(0xF0131525, 0f)
+            elevation = dp(18).toFloat()
+        }
+        panel.addView(TextView(this).apply {
+            text = "EXCELLENCE"
+            textSize = 17f
+            letterSpacing = 0.12f
+            setTextColor(Color.rgb(76, 232, 240))
+            setPadding(0, 0, 0, dp(18))
+        })
+        val items = listOf(
+            "INÍCIO" to R.drawable.ic_nav_home,
+            "CANAIS" to R.drawable.ic_nav_live,
+            "FILMES" to R.drawable.ic_nav_movies,
+            "SÉRIES" to R.drawable.ic_nav_series,
+            "FAVORITOS" to R.drawable.ic_nav_favorites,
+            "AJUSTES" to R.drawable.ic_nav_settings,
+        )
+        val popup = PopupWindow(panel, dp(270), ViewGroup.LayoutParams.MATCH_PARENT, true).apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            isOutsideTouchable = true
+            elevation = dp(18).toFloat()
+        }
+        items.forEach { (label, iconRes) ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isClickable = true
+                background = rounded(if (isNavigationSelected(label)) 0x554CE8F0 else 0x00111629, 14f)
+                layoutParams = LinearLayout.LayoutParams(-1, dp(72)).apply { setMargins(0, dp(3), 0, dp(3)) }
+                setPadding(dp(10), 0, dp(12), 0)
                 setOnClickListener {
+                    popup.dismiss()
                     when (label) {
-                        "INÍCIO", "CANAIS" -> switchSection(MediaKind.LIVE)
+                        "INÍCIO" -> showHome()
+                        "CANAIS" -> switchSection(MediaKind.LIVE)
                         "FILMES" -> switchSection(MediaKind.MOVIE)
                         "SÉRIES" -> switchSection(MediaKind.SERIES)
                         "FAVORITOS" -> switchFavorites()
                         "AJUSTES" -> showSettingsDialog()
                     }
                 }
-                setOnFocusChangeListener { view, hasFocus ->
-                    val active = hasFocus || isNavigationSelected(label)
-                    view.background = rounded(if (active) 0x443FE7EF else 0x00111629, 12f)
-                    icon.setColorFilter(if (active) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
-                    caption.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                }
             }
-            icon = ImageView(this).apply {
+            row.addView(ImageView(this).apply {
                 setImageResource(iconRes)
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
-                setColorFilter(if (isNavigationSelected(label) || index == 1) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
+                setColorFilter(if (isNavigationSelected(label)) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
                 background = getDrawable(R.drawable.nav_icon_bg)
-                layoutParams = LinearLayout.LayoutParams(54, 50)
-            }
-            caption = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+            })
+            row.addView(TextView(this).apply {
                 text = label
-                gravity = Gravity.CENTER
-                textSize = 8f
-                setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 22)
-            }
-            row.addView(icon)
-            row.addView(caption)
-            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 12f)
-            navItems.addView(row)
+                textSize = 14f
+                setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(230, 235, 250))
+                layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(dp(16), 0, 0, 0) }
+            })
+            panel.addView(row)
         }
+        popup.showAtLocation(findViewById(R.id.rootShell), Gravity.START or Gravity.TOP, 0, 0)
     }
 
     private fun isNavigationSelected(label: String): Boolean = when {
+        homeMode -> label == "INÍCIO"
         favoritesOnly -> label == "FAVORITOS"
-        currentKind == MediaKind.LIVE -> label == "CANAIS" || label == "INÍCIO"
+        currentKind == MediaKind.LIVE -> label == "CANAIS"
         currentKind == MediaKind.MOVIE -> label == "FILMES"
         else -> label == "SÉRIES"
     }
 
+    private fun showHome() {
+        homeMode = true
+        favoritesOnly = false
+        homePanel.visibility = View.VISIBLE
+        previewScroll.visibility = View.GONE
+        findViewById<View>(R.id.channelColumn).visibility = View.GONE
+        renderNavigation()
+        renderHomeRows()
+    }
+
     private fun switchSection(kind: MediaKind) {
+        homeMode = false
+        homePanel.visibility = View.VISIBLE
+        previewScroll.visibility = View.GONE
+        findViewById<View>(R.id.channelColumn).visibility = View.GONE
         favoritesOnly = false
         currentKind = kind
         selectedCategory = "Todos"
         query = ""
-        searchHint.text = searchPlaceholder()
+        searchHint.text = when (kind) {
+            MediaKind.LIVE -> "Buscar canal..."
+            MediaKind.MOVIE -> "Buscar filme..."
+            MediaKind.SERIES -> "Buscar série..."
+        }
         channelHeading.text = when (kind) {
             MediaKind.LIVE -> "CANAIS AO VIVO"
             MediaKind.MOVIE -> "FILMES"
@@ -283,10 +359,15 @@ class MainActivity : Activity() {
         renderNavigation()
         renderCategories()
         renderCatalog()
+        renderBrowseMode(kind)
         selectFirstVisible()
     }
 
     private fun switchFavorites() {
+        homeMode = false
+        homePanel.visibility = View.VISIBLE
+        previewScroll.visibility = View.GONE
+        findViewById<View>(R.id.channelColumn).visibility = View.GONE
         favoritesOnly = true
         selectedCategory = "Todos"
         query = ""
@@ -295,6 +376,7 @@ class MainActivity : Activity() {
         renderNavigation()
         renderCategories()
         renderCatalog()
+        renderBrowseMode(null)
         selectFirstVisible()
     }
 
@@ -637,33 +719,107 @@ class MainActivity : Activity() {
         renderCatalog()
         selectFirstVisible()
         loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
-        renderVodStrip()
+        if (homeMode) renderHomeRows() else renderBrowseMode(currentKind)
     }
 
-    private fun renderVodStrip() {
-        vodCards.removeAllViews()
+    private fun renderHomeRows() {
+        if (!databaseBackedCatalog) {
+            homeFeaturedCards.removeAllViews()
+            homeChannelCards.removeAllViews()
+            homeSeriesCards.removeAllViews()
+            vodCards.removeAllViews()
+            return
+        }
+        findViewById<TextView>(R.id.homeTitle).text = "Olá, usuário  •  ${catalog.totalCount} itens"
+        fillHomeRow(homeFeaturedCards, MediaKind.MOVIE, 8, 220, 154)
+        fillHomeRow(homeChannelCards, MediaKind.LIVE, 8, 170, 118)
+        fillHomeRow(homeSeriesCards, MediaKind.SERIES, 8, 220, 154)
+        fillHomeRow(vodCards, MediaKind.MOVIE, 8, 220, 154)
+    }
+
+    private fun renderBrowseMode(kind: MediaKind?) {
+        val title = findViewById<TextView>(R.id.homeTitle)
+        val subtitle = findViewById<TextView>(R.id.homeSubtitle)
+        val channelsTitle = findViewById<TextView>(R.id.homeChannelsTitle)
+        val seriesTitle = findViewById<TextView>(R.id.homeSeriesTitle)
+        val vodTitleView = findViewById<TextView>(R.id.vodTitle)
+        val showAll = kind == null
+        title.text = when (kind) {
+            MediaKind.LIVE -> "Canais ao vivo"
+            MediaKind.MOVIE -> "Filmes em alta"
+            MediaKind.SERIES -> "Séries em alta"
+            null -> "Favoritos"
+        }
+        subtitle.text = "${catalog.totalCount} itens disponíveis no seu catálogo"
+        channelsTitle.visibility = if (showAll) View.VISIBLE else View.GONE
+        homeChannelCards.visibility = if (showAll) View.VISIBLE else View.GONE
+        seriesTitle.visibility = if (showAll) View.VISIBLE else View.GONE
+        homeSeriesCards.visibility = if (showAll) View.VISIBLE else View.GONE
+        vodTitleView.visibility = if (showAll) View.VISIBLE else View.GONE
+        vodCards.visibility = if (showAll) View.VISIBLE else View.GONE
+        val target = if (showAll) null else kind
+        fillHomeRow(homeFeaturedCards, target, 12, 220, 154)
+        if (showAll) {
+            fillHomeRow(homeChannelCards, MediaKind.LIVE, 8, 170, 118)
+            fillHomeRow(homeSeriesCards, MediaKind.SERIES, 8, 220, 154)
+            fillHomeRow(vodCards, MediaKind.MOVIE, 8, 220, 154)
+        }
+    }
+
+    private fun fillHomeRow(container: LinearLayout, kind: MediaKind?, limit: Int, cardWidth: Int, cardHeight: Int) {
+        container.removeAllViews()
         if (!databaseBackedCatalog) return
-        repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortAlphabetically, 4, 0) { movies ->
+        repository.queryPage(
+            kind = kind,
+            group = "Todos",
+            search = "",
+            hidden = hiddenGroups(),
+            favorites = if (kind == null || favoritesOnly) favorites() else emptySet(),
+            sortAlphabetically = sortAlphabetically,
+            limit = limit,
+            offset = 0,
+        ) { entries ->
             runOnUiThread {
-                movies.forEach { movie ->
-                    val card = TextView(this).apply {
-                        text = movie.name
-                        gravity = Gravity.CENTER_VERTICAL
-                        maxLines = 2
-                        ellipsize = android.text.TextUtils.TruncateAt.END
-                        textSize = 10f
-                        setTextColor(Color.WHITE)
-                        setPadding(12, 6, 12, 6)
-                        background = rounded(0x661B2036, 10f)
-                        isFocusable = true
-                        isClickable = true
-                        layoutParams = LinearLayout.LayoutParams(150, 52).apply { setMargins(0, 0, 8, 0) }
-                        setOnClickListener { selectEntry(movie, true) }
-                    }
-                    vodCards.addView(card)
-                }
+                entries.forEach { entry -> container.addView(createHomeCard(entry, cardWidth, cardHeight)) }
             }
         }
+    }
+
+    private fun createHomeCard(entry: CatalogEntry, cardWidth: Int, cardHeight: Int): View {
+        val card = FrameLayout(this).apply {
+            isFocusable = true
+            isClickable = true
+            background = rounded(0x661B2036, 14f)
+            layoutParams = LinearLayout.LayoutParams(cardWidth, cardHeight).apply { setMargins(0, 0, 12, 0) }
+            setOnFocusChangeListener { view, hasFocus ->
+                view.background = rounded(if (hasFocus) 0xAA4CE8F0 else 0x661B2036, 14f)
+            }
+            setOnClickListener { selectEntry(entry, false) }
+        }
+        val image = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = entry.name
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+        }
+        val source = entry.backdropUrl.ifBlank { entry.logoUrl }
+        if (source.isBlank()) image.setImageResource(fallbackHero(entry)) else imageLoader.load(source, image, fallbackHero(entry))
+        card.addView(image)
+        card.addView(View(this).apply {
+            setBackgroundColor(0x88030914.toInt())
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+        })
+        card.addView(TextView(this).apply {
+            text = entry.name
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            textSize = if (cardHeight < 140) 10f else 12f
+            setTextColor(Color.WHITE)
+            setShadowLayer(5f, 0f, 2f, Color.BLACK)
+            setPadding(12, 8, 12, 8)
+            gravity = Gravity.BOTTOM
+            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+        })
+        return card
     }
 
     private fun showCatalogUnavailable(message: String) {
@@ -952,6 +1108,8 @@ class MainActivity : Activity() {
         currentKind == MediaKind.SERIES -> "Buscar série..."
         else -> "Buscar canal..."
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt().coerceAtLeast(1)
 
     private fun rounded(color: Long, radius: Float): GradientDrawable = GradientDrawable().apply {
         setColor(Color.argb((color shr 24 and 0xFF).toInt(), (color shr 16 and 0xFF).toInt(), (color shr 8 and 0xFF).toInt(), (color and 0xFF).toInt()))
