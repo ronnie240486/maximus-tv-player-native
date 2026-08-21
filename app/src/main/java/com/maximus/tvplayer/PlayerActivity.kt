@@ -32,6 +32,7 @@ class PlayerActivity : Activity() {
         errorView = findViewById(R.id.playerError)
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val streamUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
+        val mac = intent.getStringExtra(EXTRA_MAC).orEmpty()
         findViewById<TextView>(R.id.playerTitle).text = title
         if (streamUrl.isBlank()) {
             showError("URL de reprodução não disponível")
@@ -41,6 +42,10 @@ class PlayerActivity : Activity() {
             playerView.player = exo
             exo.addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
+                    if (mac.isNotBlank()) {
+                        val integration = AppIntegrationRepository()
+                        integration.reportPlaybackFailure(mac) { integration.shutdown() }
+                    }
                     showError("Não foi possível reproduzir este conteúdo")
                 }
             })
@@ -64,5 +69,6 @@ class PlayerActivity : Activity() {
     companion object {
         const val EXTRA_TITLE = "player_title"
         const val EXTRA_URL = "player_url"
+        const val EXTRA_MAC = "player_mac"
     }
 }

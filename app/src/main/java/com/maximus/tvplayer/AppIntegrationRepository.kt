@@ -1,7 +1,5 @@
 package com.maximus.tvplayer
 
-import android.os.Handler
-import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -22,6 +20,8 @@ data class RemoteAppConfig(
     val mac: String,
     val appId: String,
     val appName: String,
+    val status: String,
+    val expiration: String,
     val logoUrl: String,
     val bannerUrl: String,
     val backgroundUrl: String,
@@ -32,24 +32,34 @@ data class RemoteAppConfig(
     val iconMovies: String,
     val iconSeries: String,
     val serverApiUrl: String,
+    val dnsUrl: String,
+    val testApiUrl: String,
+    val epgUrl: String,
     val playlistUrls: List<String>,
     val apkDownloadUrl: String,
     val apkVersion: String,
 )
 
-data class RemoteNotification(val id: Long, val title: String, val message: String)
+data class RemoteNotification(val id: Long, val severity: String, val title: String, val message: String)
 data class RemoteCommand(val id: Long, val command: String, val payload: JSONObject)
 data class UpdateInfo(val available: Boolean, val version: String, val url: String)
+data class WatchingInfo(val title: String, val updatedAt: String)
+data class ServerTestResult(val ok: Boolean, val httpCode: Int, val contentType: String, val message: String)
 
 class AppIntegrationRepository {
     private val executor = Executors.newFixedThreadPool(3)
     private val heartbeat: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private var syncFuture: ScheduledFuture<*>? = null
-    private val main = Handler(Looper.getMainLooper())
 
     fun fetchConfig(mac: String, callback: (Result<RemoteAppConfig>) -> Unit) {
+        getAsync("/api/v5/check_mac.php?mac=${encode(mac)}") { result ->
+            callback(result.map { parseMaximusConfig(it, mac) })
+        }
+    }
+
+    fun fetchLegacyConfig(mac: String, callback: (Result<RemoteAppConfig>) -> Unit) {
         getAsync("/api/v5/apps/evolux/config?mac=${encode(mac)}") { result ->
-            callback(result.map { parseConfig(it, mac) })
+            callback(result.map { parseGenericConfig(it, mac) })
         }
     }
 
@@ -57,14 +67,30 @@ class AppIntegrationRepository {
         getAsync("/api/device/check?mac=${encode(mac)}", callback)
     }
 
+    fun fetchCurrentWatching(mac: String, callback: (Result<WatchingInfo?>) -> Unit) {
+        getAsync("/api/v5/current-watching?mac=${encode(mac)}") { result ->
+            callback(result.map { json ->
+                val root = json.optJSONObject("data") ?: json
+                val title = root.optString("current_content", root.optString("title"))
+                if (title.isBlank()) null else WatchingInfo(title, root.optString("updated_at"))
+            })
+        }
+    }
+
     fun fetchNotifications(mac: String, callback: (Result<List<RemoteNotification>>) -> Unit) {
         getAsync("/api/v5/list-notifications?mac=${encode(mac)}") { result ->
             callback(result.map { json ->
-                val array = json.optJSONArray("notifications") ?: json.optJSONArray("data") ?: JSONArray()
+                val root = json.optJSONObject("data") ?: json
+                val array = root.optJSONArray("notifications") ?: json.optJSONArray("notifications") ?: JSONArray()
                 buildList {
                     for (index in 0 until array.length()) {
                         val item = array.optJSONObject(index) ?: continue
-                        add(RemoteNotification(item.optLong("id"), item.optString("title"), item.optString("message")))
+                        add(RemoteNotification(
+                            id = item.optLong("id"),
+                            severity = item.optString("severity", "info"),
+                            title = item.optString("title"),
+                            message = item.optString("message"),
+                        ))
                     }
                 }
             })
@@ -74,7 +100,8 @@ class AppIntegrationRepository {
     fun fetchRemoteCommands(mac: String, callback: (Result<List<RemoteCommand>>) -> Unit) {
         getAsync("/api/v5/remote-commands?mac=${encode(mac)}") { result ->
             callback(result.map { json ->
-                val array = json.optJSONArray("commands") ?: json.optJSONArray("data") ?: JSONArray()
+                val root = json.optJSONObject("data") ?: json
+                val array = root.optJSONArray("commands") ?: json.optJSONArray("commands") ?: JSONArray()
                 buildList {
                     for (index in 0 until array.length()) {
                         val item = array.optJSONObject(index) ?: continue
@@ -101,11 +128,35 @@ class AppIntegrationRepository {
         }) { }
     }
 
-    fun reportPlaybackFailure(mac: String, activeListNumber: Int? = null) {
+    fun reportPlaybackFailure(mac: String, activeListNumber: Int? = null, callback: (Result<JSONObject>) -> Unit = {}) {
         postAsync("/api/v5/playback-failure", JSONObject().apply {
             put("mac", mac)
             activeListNumber?.let { put("active_list_number", it) }
-        }) { }
+        }, callback)
+    }
+
+    fun reportMaximusTestResult(payload: JSONObject, callback: (Result<JSONObject>) -> Unit = {}) {
+        postAsync("/api/v5/maximus-test-result", payload, callback)
+    }
+
+    fun testExternalApi(urlString: String, callback: (Result<ServerTestResult>) -> Unit) {
+        executor.execute {
+            callback(runCatching {
+                val connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 30_000
+                    setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
+                }
+                val status = connection.responseCode
+                val contentType = connection.contentType.orEmpty()
+                val preview = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readLine().orEmpty() }.orEmpty()
+                connection.disconnect()
+                val html = preview.trimStart().startsWith("<html", true) || preview.trimStart().startsWith("<!doctype", true)
+                ServerTestResult(status in 200..299 && !html, status, contentType, if (html) "Resposta HTML/bloqueio" else "Resposta recebida")
+            })
+        }
     }
 
     fun sendHeartbeat(mac: String, currentContent: String? = null) {
@@ -120,12 +171,6 @@ class AppIntegrationRepository {
         getAsync(path) { }
     }
 
-    fun startHeartbeat(mac: String, currentContent: () -> String?) {
-        stopHeartbeat()
-        sendHeartbeat(mac, currentContent())
-        syncFuture = heartbeat.scheduleAtFixedRate({ sendHeartbeat(mac, currentContent()) }, 60, 60, TimeUnit.SECONDS)
-    }
-
     fun startBackgroundSync(
         mac: String,
         currentContent: () -> String?,
@@ -133,14 +178,21 @@ class AppIntegrationRepository {
         onCommands: (List<RemoteCommand>) -> Unit,
     ) {
         stopHeartbeat()
+        syncNow(mac, currentContent, onNotifications, onCommands)
+        syncFuture = heartbeat.scheduleAtFixedRate({
+            syncNow(mac, currentContent, onNotifications, onCommands)
+        }, 60, 60, TimeUnit.SECONDS)
+    }
+
+    private fun syncNow(
+        mac: String,
+        currentContent: () -> String?,
+        onNotifications: (List<RemoteNotification>) -> Unit,
+        onCommands: (List<RemoteCommand>) -> Unit,
+    ) {
         sendHeartbeat(mac, currentContent())
         fetchNotifications(mac) { it.onSuccess(onNotifications) }
         fetchRemoteCommands(mac) { it.onSuccess(onCommands) }
-        syncFuture = heartbeat.scheduleAtFixedRate({
-            sendHeartbeat(mac, currentContent())
-            fetchNotifications(mac) { it.onSuccess(onNotifications) }
-            fetchRemoteCommands(mac) { it.onSuccess(onCommands) }
-        }, 60, 60, TimeUnit.SECONDS)
     }
 
     fun stopHeartbeat() {
@@ -149,7 +201,7 @@ class AppIntegrationRepository {
     }
 
     fun checkUpdate(mac: String, callback: (Result<UpdateInfo>) -> Unit) {
-        getAsync("/api/v5/apps/evolux/update?mac=${encode(mac)}") { result ->
+        getAsync("/api/v5/maximus-update?mac=${encode(mac)}") { result ->
             callback(result.map { json ->
                 UpdateInfo(
                     available = json.optBoolean("update_available", false),
@@ -160,28 +212,74 @@ class AppIntegrationRepository {
         }
     }
 
+    fun fetchDnsList(callback: (Result<List<String>>) -> Unit) {
+        getAsync("/api/v5/getdns_list") { result ->
+            callback(result.map { json ->
+                val array = json.optJSONArray("data") ?: json.optJSONArray("dns") ?: JSONArray()
+                buildList {
+                    for (index in 0 until array.length()) {
+                        val item = array.opt(index)
+                        val value = if (item is JSONObject) item.optString("url", item.optString("dns")) else item.toString()
+                        if (value.startsWith("http", true)) add(value)
+                    }
+                }
+            })
+        }
+    }
+
     fun shutdown() {
         stopHeartbeat()
         heartbeat.shutdownNow()
         executor.shutdownNow()
     }
 
-    private fun parseConfig(json: JSONObject, fallbackMac: String): RemoteAppConfig {
+    private fun parseMaximusConfig(json: JSONObject, fallbackMac: String): RemoteAppConfig {
+        val root = json.optJSONObject("data") ?: json
+        val found = root.optBoolean("found", root.optBoolean("registered", true))
+        val allowed = root.optBoolean("allowed", false)
+        val status = root.optString("status", "")
+        val blockedStatus = status.lowercase() in setOf("blocked", "bloqueado", "expired", "expirado", "denied", "negado")
+        val playlist = root.optString("urlM3u8", root.optString("playlist_url", ""))
+        val epg = root.optString("urlEpg", root.optString("epg_url", ""))
+        val playlistUrls = if (playlist.startsWith("http", true)) listOf(playlist) else parsePlaylistArray(root.optJSONArray("playlist_urls"))
+        return RemoteAppConfig(
+            registered = found,
+            allowed = found && allowed && !blockedStatus,
+            mac = root.optString("mac", fallbackMac),
+            appId = root.optString("app_id", "maximus"),
+            appName = root.optString("app_name", root.optString("app", "Maximus Player")),
+            status = status,
+            expiration = root.optString("dataExpiracao", root.optString("expiration", "")),
+            logoUrl = root.optString("logo_url"),
+            bannerUrl = root.optString("banner_url"),
+            backgroundUrl = root.optString("background_url"),
+            messageTitle = root.optString("message_title"),
+            messageText = root.optString("message_text"),
+            messageImageUrl = root.optString("message_image_url"),
+            iconLiveTv = root.optString("icon_live_tv"),
+            iconMovies = root.optString("icon_movies"),
+            iconSeries = root.optString("icon_series"),
+            serverApiUrl = root.optString("server_api_url", root.optString("dns_url")),
+            dnsUrl = root.optString("dns_url"),
+            testApiUrl = root.optString("test_api_url"),
+            epgUrl = epg,
+            playlistUrls = playlistUrls,
+            apkDownloadUrl = root.optString("apk_download_url"),
+            apkVersion = root.optString("apk_version"),
+        )
+    }
+
+    private fun parseGenericConfig(json: JSONObject, fallbackMac: String): RemoteAppConfig {
         val root = json.optJSONObject("data") ?: json
         val icons = root.optJSONObject("icons") ?: JSONObject()
-        val playlistArray = root.optJSONArray("playlist_urls") ?: JSONArray()
-        val playlists = buildList {
-            for (index in 0 until playlistArray.length()) {
-                val value = playlistArray.optString(index).trim()
-                if (value.startsWith("http", true)) add(value)
-            }
-        }
         return RemoteAppConfig(
             registered = root.optBoolean("registered", true),
             allowed = root.optBoolean("allowed", true),
             mac = root.optString("mac", fallbackMac),
             appId = root.optString("app_id", "evolux"),
             appName = root.optString("app_name", "Maximus TV Player"),
+            status = root.optString("status"),
+            expiration = root.optString("dataExpiracao", root.optString("expiration")),
             logoUrl = root.optString("logo_url"),
             bannerUrl = root.optString("banner_url"),
             backgroundUrl = root.optString("background_url"),
@@ -192,22 +290,29 @@ class AppIntegrationRepository {
             iconMovies = icons.optString("movies"),
             iconSeries = icons.optString("series"),
             serverApiUrl = root.optString("server_api_url"),
-            playlistUrls = playlists,
+            dnsUrl = root.optString("dns_url"),
+            testApiUrl = root.optString("test_api_url"),
+            epgUrl = root.optString("urlEpg", root.optString("epg_url")),
+            playlistUrls = parsePlaylistArray(root.optJSONArray("playlist_urls")),
             apkDownloadUrl = root.optString("apk_download_url"),
             apkVersion = root.optString("apk_version"),
         )
     }
 
-    private fun getAsync(path: String, callback: (Result<JSONObject>) -> Unit) {
-        executor.execute {
-            callback(runCatching { request("GET", path, null) })
+    private fun parsePlaylistArray(array: JSONArray?): List<String> = buildList {
+        if (array == null) return@buildList
+        for (index in 0 until array.length()) {
+            val value = array.optString(index).trim()
+            if (value.startsWith("http", true)) add(value)
         }
     }
 
+    private fun getAsync(path: String, callback: (Result<JSONObject>) -> Unit) {
+        executor.execute { callback(runCatching { request("GET", path, null) }) }
+    }
+
     private fun postAsync(path: String, body: JSONObject, callback: (Result<JSONObject>) -> Unit) {
-        executor.execute {
-            callback(runCatching { request("POST", path, body) })
-        }
+        executor.execute { callback(runCatching { request("POST", path, body) }) }
     }
 
     private fun request(method: String, path: String, body: JSONObject?): JSONObject {

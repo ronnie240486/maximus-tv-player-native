@@ -72,6 +72,7 @@ class MainActivity : Activity() {
     private var currentKind = MediaKind.LIVE
     private var sortAlphabetically = false
     private var remoteBannerUrl = ""
+    private var remoteEpgUrl = ""
 
     private val editorials = mapOf(
         "animal planet" to ChannelEditorial(
@@ -375,6 +376,7 @@ class MainActivity : Activity() {
         startActivity(Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_TITLE, entry.name)
             putExtra(PlayerActivity.EXTRA_URL, entry.streamUrl)
+            putExtra(PlayerActivity.EXTRA_MAC, getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
         })
     }
 
@@ -430,6 +432,13 @@ class MainActivity : Activity() {
         if (config.logoUrl.isNotBlank()) imageLoader.load(config.logoUrl, appLogo, R.drawable.tv_banner)
         if (config.backgroundUrl.isNotBlank()) imageLoader.load(config.backgroundUrl, remoteBackground, R.drawable.tv_banner)
         if (config.bannerUrl.isNotBlank()) remoteBannerUrl = config.bannerUrl
+        if (config.epgUrl.isNotBlank()) remoteEpgUrl = config.epgUrl
+        if (config.dnsUrl.isNotBlank() || config.serverApiUrl.isNotBlank() || config.testApiUrl.isNotBlank()) {
+            getPreferences(MODE_PRIVATE).edit()
+                .putString(PREF_SERVER_API_URL, config.dnsUrl.ifBlank { config.serverApiUrl })
+                .putString(PREF_TEST_API_URL, config.testApiUrl)
+                .apply()
+        }
         if (config.messageTitle.isNotBlank() || config.messageText.isNotBlank()) {
             val messageKey = "${config.messageTitle}|${config.messageText}"
             val shownKey = getPreferences(MODE_PRIVATE).getString(PREF_LAST_MESSAGE_KEY, "")
@@ -457,7 +466,7 @@ class MainActivity : Activity() {
                         renderCategories()
                         renderCatalog()
                         selectFirstVisible()
-                        loadDerivedEpg(config.playlistUrls.firstOrNull())
+                        loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
                     }.onFailure {
                         Toast.makeText(this, "Lista remota indisponível; mantendo a última lista válida", Toast.LENGTH_LONG).show()
                     }
@@ -520,6 +529,15 @@ class MainActivity : Activity() {
                     appIntegration.ackCommand(mac, command.id, "failed", "URL de playlist ausente")
                 }
             }
+            "update_dns" -> {
+                val dns = command.payload.optString("dns", command.payload.optString("url"))
+                if (dns.startsWith("http", true)) {
+                    getPreferences(MODE_PRIVATE).edit().putString(PREF_SERVER_API_URL, dns).apply()
+                    appIntegration.ackCommand(mac, command.id, "executed", "DNS aplicada")
+                } else {
+                    appIntegration.ackCommand(mac, command.id, "failed", "DNS ausente")
+                }
+            }
             "show_message" -> {
                 AlertDialog.Builder(this)
                     .setTitle(command.payload.optString("title", "Aviso"))
@@ -546,12 +564,13 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Ajustes do catálogo")
             .setMessage(message)
-            .setItems(arrayOf("Configurar M3U", "Categorias ocultas e ordem", "Configurar MAC", "Limpar cache")) { _, which ->
+            .setItems(arrayOf("Configurar M3U", "Categorias ocultas e ordem", "Configurar MAC", "Testar API do Servidor", "Limpar cache")) { _, which ->
                 when (which) {
                     0 -> showPlaylistDialog()
                     1 -> showCatalogRulesDialog()
                     2 -> showMacDialog()
-                    3 -> {
+                    3 -> showServerTestDialog()
+                    4 -> {
                         repository.clearCache()
                         Toast.makeText(this, "Cache limpo", Toast.LENGTH_SHORT).show()
                     }
@@ -594,6 +613,41 @@ class MainActivity : Activity() {
                 selectFirstVisible()
             }
             .show()
+    }
+
+    private fun showServerTestDialog() {
+        val mac = getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
+        val apiUrl = getPreferences(MODE_PRIVATE).getString(PREF_TEST_API_URL, "").orEmpty()
+        if (apiUrl.isBlank()) {
+            Toast.makeText(this, "A API do Servidor ainda não foi configurada no painel", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Testando API do Servidor...", Toast.LENGTH_SHORT).show()
+        appIntegration.testExternalApi(apiUrl) { result ->
+            runOnUiThread {
+                result.onSuccess { test ->
+                    val status = if (test.ok) "online" else "offline"
+                    val payload = JSONObject().apply {
+                        put("mac", mac)
+                        put("name", brandMark.text.toString())
+                        put("status", status)
+                        put("source", "maximus")
+                    }
+                    appIntegration.reportMaximusTestResult(payload)
+                    AlertDialog.Builder(this)
+                        .setTitle("Teste da API do Servidor")
+                        .setMessage("Status: $status\\nHTTP: ${test.httpCode}\\n${test.message}")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }.onFailure {
+                    AlertDialog.Builder(this)
+                        .setTitle("Falha no teste")
+                        .setMessage(it.message ?: "Não foi possível testar a API")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }
     }
 
     private fun showMacDialog() {
@@ -681,7 +735,13 @@ class MainActivity : Activity() {
 
     private fun loadDerivedEpg(m3uUrl: String?) {
         val epgUrl = m3uUrl?.takeIf { it.contains("get.php", true) }?.replace("get.php", "xmltv.php", ignoreCase = true) ?: return
-        epgRepository.load(epgUrl) { result ->
+        loadConfiguredEpg(epgUrl)
+    }
+
+    private fun loadConfiguredEpg(epgUrl: String?) {
+        if (epgUrl.isNullOrBlank()) return
+        val resolved = if (epgUrl.contains("get.php", true)) epgUrl.replace("get.php", "xmltv.php", ignoreCase = true) else epgUrl
+        epgRepository.load(resolved) { result ->
             result.onSuccess { map ->
                 runOnUiThread {
                     epgByChannel = map
@@ -790,6 +850,8 @@ class MainActivity : Activity() {
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"
         private const val PREF_MAC_ADDRESS = "mac_address"
+        private const val PREF_SERVER_API_URL = "server_api_url"
+        private const val PREF_TEST_API_URL = "test_api_url"
         private const val PREF_LAST_MESSAGE_KEY = "last_remote_message_key"
     }
 }
