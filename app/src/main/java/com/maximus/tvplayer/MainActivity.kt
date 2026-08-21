@@ -73,6 +73,13 @@ class MainActivity : Activity() {
     private lateinit var homeSeriesCards: LinearLayout
     private lateinit var vodCards: LinearLayout
     private lateinit var vodTitle: TextView
+    private lateinit var homeNavItems: LinearLayout
+    private lateinit var homeHeroImage: ImageView
+    private lateinit var homeHeroTitle: TextView
+    private lateinit var homeHeroDescription: TextView
+    private lateinit var homeHeroPlay: TextView
+    private lateinit var homeVodCards: LinearLayout
+    private lateinit var homeVodTitle: TextView
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
@@ -201,8 +208,16 @@ class MainActivity : Activity() {
         homeSeriesCards = findViewById(R.id.homeSeriesCards)
         vodCards = findViewById(R.id.vodCards)
         vodTitle = findViewById(R.id.vodTitle)
+        homeNavItems = findViewById(R.id.homeNavItems)
+        homeHeroImage = findViewById(R.id.homeHeroImage)
+        homeHeroTitle = findViewById(R.id.homeHeroTitle)
+        homeHeroDescription = findViewById(R.id.homeHeroDescription)
+        homeHeroPlay = findViewById(R.id.homeHeroPlay)
+        homeVodCards = findViewById(R.id.homeVodCards)
+        homeVodTitle = findViewById(R.id.homeVodTitle)
         searchHint.setOnClickListener { showSearchDialog() }
         findViewById<View>(R.id.videoPreview).isFocusable = true
+        homeHeroPlay.setOnClickListener { selectedEntry?.let { if (it.kind != MediaKind.LIVE && it.trailerUrl.isNotBlank()) openPreview(it) else openEntry(it) } }
     }
 
     private fun setupCatalogList() {
@@ -225,32 +240,95 @@ class MainActivity : Activity() {
 
     private fun renderNavigation() {
         navItems.removeAllViews()
-        val items = listOf(
-            "INÍCIO" to R.drawable.ic_nav_home,
-            "CANAIS" to R.drawable.ic_nav_live,
-            "FILMES" to R.drawable.ic_nav_movies,
-            "SÉRIES" to R.drawable.ic_nav_series,
-            "FAVORITOS" to R.drawable.ic_nav_favorites,
-            "AJUSTES" to R.drawable.ic_nav_settings,
-        )
-        items.forEach { (label, iconRes) ->
-            val icon = ImageView(this).apply {
-                setImageResource(iconRes)
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
-                setColorFilter(if (isNavigationSelected(label)) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
-                background = getDrawable(R.drawable.nav_icon_bg)
-                contentDescription = label
+        val items = listOf("INÍCIO" to "⌂", "CANAIS" to "◉", "FILMES" to "▣", "SÉRIES" to "▤", "FAVORITOS" to "★", "AJUSTES" to "⚙")
+        items.forEach { (label, glyph) ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
-                layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply { setMargins(dp(4), dp(2), dp(4), dp(2)) }
-                setOnClickListener { showExpandedNavigation() }
+                layoutParams = LinearLayout.LayoutParams(-1, 64).apply { setMargins(4, 2, 4, 2) }
+                setOnClickListener {
+                    when (label) {
+                        "INÍCIO" -> showHome()
+                        "CANAIS" -> switchSection(MediaKind.LIVE)
+                        "FILMES" -> switchSection(MediaKind.MOVIE)
+                        "SÉRIES" -> switchSection(MediaKind.SERIES)
+                        "FAVORITOS" -> switchFavorites()
+                        "AJUSTES" -> showSettingsDialog()
+                    }
+                }
                 setOnFocusChangeListener { view, hasFocus ->
-                    view.background = rounded(if (hasFocus || isNavigationSelected(label)) 0x664CE8F0 else 0x331B2036, 18f)
-                    setColorFilter(if (hasFocus || isNavigationSelected(label)) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
+                    val active = hasFocus || isNavigationSelected(label)
+                    view.background = rounded(if (active) 0x333FE7EF else 0x00111629, 10f)
                 }
             }
-            navItems.addView(icon)
+            row.addView(TextView(this).apply {
+                text = glyph
+                gravity = Gravity.CENTER
+                textSize = 20f
+                setTextColor(if (isNavigationSelected(label)) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
+                background = rounded(0x441B2036, 24f)
+                layoutParams = LinearLayout.LayoutParams(42, 38)
+            })
+            row.addView(TextView(this).apply {
+                text = label
+                gravity = Gravity.CENTER
+                textSize = 8f
+                setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                layoutParams = LinearLayout.LayoutParams(-1, 20)
+            })
+            navItems.addView(row)
         }
+    }
+
+    private fun renderHomeNavigation() {
+        homeNavItems.removeAllViews()
+        val items = listOf("INÍCIO", "CANAIS", "FILMES", "SÉRIES", "FAVORITOS")
+        items.forEach { label ->
+            val item = TextView(this).apply {
+                text = label
+                gravity = Gravity.CENTER
+                textSize = 11f
+                isFocusable = true
+                isClickable = true
+                setPadding(dp(16), 0, dp(16), 0)
+                layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { setMargins(dp(4), 0, dp(4), 0) }
+                setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(205, 212, 232))
+                background = rounded(if (isNavigationSelected(label)) 0x553FE7EF else 0x00111629, 12f)
+                setOnClickListener {
+                    when (label) {
+                        "INÍCIO" -> showHome()
+                        "CANAIS" -> switchSection(MediaKind.LIVE)
+                        "FILMES" -> switchSection(MediaKind.MOVIE)
+                        "SÉRIES" -> switchSection(MediaKind.SERIES)
+                        "FAVORITOS" -> switchFavorites()
+                    }
+                }
+                setOnFocusChangeListener { view, hasFocus ->
+                    view.background = rounded(if (hasFocus || isNavigationSelected(label)) 0x553FE7EF else 0x00111629, 12f)
+                }
+            }
+            homeNavItems.addView(item)
+        }
+    }
+
+    private fun applyHomeHero(entry: CatalogEntry) {
+        val badge = findViewById<TextView>(R.id.homeHeroBadge)
+        badge.text = when (entry.kind) {
+            MediaKind.LIVE -> "AO VIVO"
+            MediaKind.MOVIE -> "FILME EM ALTA"
+            MediaKind.SERIES -> "SÉRIE EM ALTA"
+        }
+        homeHeroTitle.text = entry.name
+        homeHeroDescription.text = listOfNotNull(
+            entry.year.takeIf { it.isNotBlank() },
+            entry.groupTitle.takeIf { it.isNotBlank() },
+            entry.synopsis.takeIf { it.isNotBlank() },
+        ).joinToString("  •  ").ifBlank { "Selecione REPRODUZIR para assistir ao conteúdo." }
+        homeHeroPlay.text = if (entry.trailerUrl.isNotBlank()) "▶  REPRODUZIR TRAILER" else "▶  REPRODUZIR"
+        val source = entry.backdropUrl.ifBlank { entry.logoUrl }
+        if (source.isBlank()) homeHeroImage.setImageResource(fallbackHero(entry)) else imageLoader.load(source, homeHeroImage, fallbackHero(entry))
     }
 
     private fun showExpandedNavigation() {
@@ -332,16 +410,19 @@ class MainActivity : Activity() {
         favoritesOnly = false
         homePanel.visibility = View.VISIBLE
         previewScroll.visibility = View.GONE
+        findViewById<View>(R.id.sideNavigation).visibility = View.GONE
         findViewById<View>(R.id.channelColumn).visibility = View.GONE
-        renderNavigation()
+        renderHomeNavigation()
         renderHomeRows()
+        selectedEntry?.let { applyHomeHero(it) }
     }
 
     private fun switchSection(kind: MediaKind) {
         homeMode = false
-        homePanel.visibility = View.VISIBLE
-        previewScroll.visibility = View.GONE
-        findViewById<View>(R.id.channelColumn).visibility = View.GONE
+        homePanel.visibility = View.GONE
+        previewScroll.visibility = View.VISIBLE
+        findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
+        findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         favoritesOnly = false
         currentKind = kind
         selectedCategory = "Todos"
@@ -365,9 +446,10 @@ class MainActivity : Activity() {
 
     private fun switchFavorites() {
         homeMode = false
-        homePanel.visibility = View.VISIBLE
-        previewScroll.visibility = View.GONE
-        findViewById<View>(R.id.channelColumn).visibility = View.GONE
+        homePanel.visibility = View.GONE
+        previewScroll.visibility = View.VISIBLE
+        findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
+        findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         favoritesOnly = true
         selectedCategory = "Todos"
         query = ""
@@ -734,7 +816,7 @@ class MainActivity : Activity() {
         fillHomeRow(homeFeaturedCards, MediaKind.MOVIE, 8, 220, 154)
         fillHomeRow(homeChannelCards, MediaKind.LIVE, 8, 170, 118)
         fillHomeRow(homeSeriesCards, MediaKind.SERIES, 8, 220, 154)
-        fillHomeRow(vodCards, MediaKind.MOVIE, 8, 220, 154)
+        fillHomeRow(homeVodCards, MediaKind.MOVIE, 8, 220, 154)
     }
 
     private fun renderBrowseMode(kind: MediaKind?) {
@@ -742,7 +824,7 @@ class MainActivity : Activity() {
         val subtitle = findViewById<TextView>(R.id.homeSubtitle)
         val channelsTitle = findViewById<TextView>(R.id.homeChannelsTitle)
         val seriesTitle = findViewById<TextView>(R.id.homeSeriesTitle)
-        val vodTitleView = findViewById<TextView>(R.id.vodTitle)
+        val vodTitleView = homeVodTitle
         val showAll = kind == null
         title.text = when (kind) {
             MediaKind.LIVE -> "Canais ao vivo"
@@ -756,13 +838,13 @@ class MainActivity : Activity() {
         seriesTitle.visibility = if (showAll) View.VISIBLE else View.GONE
         homeSeriesCards.visibility = if (showAll) View.VISIBLE else View.GONE
         vodTitleView.visibility = if (showAll) View.VISIBLE else View.GONE
-        vodCards.visibility = if (showAll) View.VISIBLE else View.GONE
+        homeVodCards.visibility = if (showAll) View.VISIBLE else View.GONE
         val target = if (showAll) null else kind
         fillHomeRow(homeFeaturedCards, target, 12, 220, 154)
         if (showAll) {
             fillHomeRow(homeChannelCards, MediaKind.LIVE, 8, 170, 118)
             fillHomeRow(homeSeriesCards, MediaKind.SERIES, 8, 220, 154)
-            fillHomeRow(vodCards, MediaKind.MOVIE, 8, 220, 154)
+            fillHomeRow(homeVodCards, MediaKind.MOVIE, 8, 220, 154)
         }
     }
 
