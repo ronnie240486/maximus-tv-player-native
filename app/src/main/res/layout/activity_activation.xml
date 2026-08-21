@@ -17,7 +17,7 @@
             android:layout_height="86dp"
             android:contentDescription="@null"
             android:scaleType="centerInside"
-            android:src="@drawable/tv_banner" />
+            android:src="@drawable/excellence_logo" />
 
         <TextView
             android:id="@+id/activationBrand"
@@ -25,7 +25,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:letterSpacing="0.16"
-            android:text="MAXIMUS"
+            android:text="EXCELLENCE"
             android:textColor="@color/cyan"
             android:textSize="24sp"
             android:textStyle="bold" />

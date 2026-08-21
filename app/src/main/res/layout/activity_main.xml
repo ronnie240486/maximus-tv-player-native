@@ -35,14 +35,14 @@
                 android:layout_marginBottom="8dp"
                 android:contentDescription="@null"
                 android:scaleType="centerInside"
-                android:src="@drawable/tv_banner" />
+                android:src="@drawable/excellence_logo" />
 
             <TextView
                 android:id="@+id/brandMark"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:letterSpacing="0.12"
-                android:text="MAXIMUS"
+                android:text="EXCELLENCE"
                 android:textColor="@color/cyan"
                 android:textSize="13sp"
                 android:textStyle="bold" />

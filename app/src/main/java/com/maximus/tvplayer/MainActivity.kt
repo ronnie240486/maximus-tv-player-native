@@ -425,12 +425,10 @@ class MainActivity : Activity() {
     }
 
     private fun applyRemoteConfig(config: RemoteAppConfig) {
-        if (config.appName.isNotBlank()) {
-            brandMark.text = config.appName.uppercase()
-            brandSubtitle.text = "TV PLAYER"
-        }
-        if (config.logoUrl.isNotBlank()) imageLoader.load(config.logoUrl, appLogo, R.drawable.tv_banner)
-        if (config.backgroundUrl.isNotBlank()) imageLoader.load(config.backgroundUrl, remoteBackground, R.drawable.tv_banner)
+        brandMark.text = "EXCELLENCE"
+        brandSubtitle.text = "TV PLAYER"
+        appLogo.setImageResource(R.drawable.excellence_logo)
+        if (config.backgroundUrl.isNotBlank()) imageLoader.load(config.backgroundUrl, remoteBackground, R.drawable.excellence_logo)
         if (config.bannerUrl.isNotBlank()) remoteBannerUrl = config.bannerUrl
         if (config.epgUrl.isNotBlank()) remoteEpgUrl = config.epgUrl
         if (config.dnsUrl.isNotBlank() || config.serverApiUrl.isNotBlank() || config.testApiUrl.isNotBlank()) {
@@ -481,7 +479,7 @@ class MainActivity : Activity() {
     private fun showAccessUnavailable(config: RemoteAppConfig) {
         AlertDialog.Builder(this)
             .setTitle("Acesso indisponível")
-            .setMessage("Este dispositivo não está autorizado para ${config.appName.ifBlank { "este aplicativo" }}. Verifique o MAC e o cadastro no painel.")
+            .setMessage("Este dispositivo não está autorizado para Excellence. Verifique o MAC e o cadastro no painel.")
             .setPositiveButton("Configurar MAC") { _, _ -> showMacDialog() }
             .setNegativeButton("Fechar", null)
             .show()
