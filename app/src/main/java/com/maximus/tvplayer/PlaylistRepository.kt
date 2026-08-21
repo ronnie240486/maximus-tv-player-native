@@ -3,17 +3,19 @@ package com.maximus.tvplayer
 import android.content.Context
 import android.util.Base64
 import java.io.BufferedReader
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.LinkedHashMap
 import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 class PlaylistRepository(private val context: Context) {
+    companion object {
+        private const val MAX_FRAGMENT_CHARS = 1_048_576
+    }
     private val executor = Executors.newSingleThreadExecutor()
     private val cacheFile = File(context.filesDir, "catalog-cache.tsv.gz")
 
@@ -22,8 +24,7 @@ class PlaylistRepository(private val context: Context) {
     fun load(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
             val result = runCatching {
-                val parsed = urls.filter { it.isNotBlank() }.flatMap { fetchAndParse(it.trim()) }
-                    .distinctBy { it.key }
+                val parsed = fetchUrls(urls)
                 if (parsed.isEmpty()) error("Nenhum item encontrado na playlist")
                 writeCache(parsed)
                 CatalogSnapshot(parsed)
@@ -39,13 +40,20 @@ class PlaylistRepository(private val context: Context) {
     fun loadRemoteOnly(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
             callback(runCatching {
-                val parsed = urls.filter { it.isNotBlank() }.flatMap { fetchAndParse(it.trim()) }
-                    .distinctBy { it.key }
+                val parsed = fetchUrls(urls)
                 if (parsed.isEmpty()) error("A lista do painel está vazia ou indisponível")
                 writeCache(parsed)
                 CatalogSnapshot(parsed)
             })
         }
+    }
+
+    private fun fetchUrls(urls: List<String>): List<CatalogEntry> {
+        val unique = LinkedHashMap<String, CatalogEntry>()
+        urls.filter { it.isNotBlank() }.forEach { url ->
+            fetchAndParse(url.trim()).forEach { entry -> unique.putIfAbsent(entry.key, entry) }
+        }
+        return unique.values.toList()
     }
 
     fun loadCached(callback: (CatalogSnapshot?) -> Unit) {
@@ -73,36 +81,97 @@ class PlaylistRepository(private val context: Context) {
         connection.connect()
         val status = connection.responseCode
         val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val content = stream?.bufferedReader(Charsets.UTF_8)?.use(BufferedReader::readText).orEmpty()
-        connection.disconnect()
-        if (status !in 200..299) error("A lista do painel recusou a conexão (HTTP $status)")
-        val trimmed = content.trimStart()
-        if (trimmed.startsWith("<html", true) || trimmed.startsWith("<!doctype", true)) {
-            error("A lista do painel devolveu uma página HTML/bloqueio, não uma M3U válida")
+        if (status !in 200..299) {
+            stream?.close()
+            connection.disconnect()
+            error("A lista do painel recusou a conexão (HTTP $status)")
         }
-        return parseM3u(content)
+        val input = stream ?: run {
+            connection.disconnect()
+            error("A lista do painel não retornou conteúdo")
+        }
+        val entries = ArrayList<CatalogEntry>()
+        input.bufferedReader(Charsets.UTF_8).use { reader ->
+            parseM3uStream(reader, entries)
+        }
+        connection.disconnect()
+        if (entries.isEmpty()) error("A lista do painel não contém entradas M3U válidas")
+        return entries
     }
 
-    private fun parseM3u(content: String): List<CatalogEntry> {
-        val entries = ArrayList<CatalogEntry>()
-        val normalized = content.replace("\r", "").replace(Regex("\\s+(?=#EXTINF:)"), "\n")
+    private fun parseM3uStream(reader: java.io.Reader, entries: MutableList<CatalogEntry>) {
+        val buffer = StringBuilder()
+        val chunk = CharArray(32 * 1024)
         var pendingInfo: String? = null
-        normalized.lines().forEach { raw ->
-            val line = raw.trim()
-            if (line.startsWith("#EXTINF:")) {
-                val sameLineUrl = Regex("\\s+(https?://\\S+)$").find(line)
-                if (sameLineUrl != null) {
-                    addEntry(entries, line.substring(0, sameLineUrl.range.first).trim(), sameLineUrl.groupValues[1])
-                    pendingInfo = null
-                } else {
-                    pendingInfo = line
+        while (true) {
+            val count = reader.read(chunk)
+            if (count < 0) break
+            buffer.append(chunk, 0, count)
+            while (true) {
+                val token = buffer.indexOf("#EXTINF:")
+                val newline = buffer.indexOf('\n')
+                if (token < 0) {
+                    if (newline >= 0) {
+                        val line = buffer.substring(0, newline)
+                        buffer.delete(0, newline + 1)
+                        pendingInfo = processM3uLine(line, pendingInfo, entries)
+                        continue
+                    }
+                    if (buffer.length > MAX_FRAGMENT_CHARS) error("A lista M3U contém uma linha inválida muito grande")
+                    break
                 }
-            } else if (pendingInfo != null && line.startsWith("http")) {
-                addEntry(entries, pendingInfo!!, line)
-                pendingInfo = null
+                if (token > 0) {
+                    if (newline >= 0 && newline < token) {
+                        val line = buffer.substring(0, newline)
+                        buffer.delete(0, newline + 1)
+                        pendingInfo = processM3uLine(line, pendingInfo, entries)
+                    } else {
+                        buffer.delete(0, token)
+                    }
+                    continue
+                }
+                val nextToken = buffer.indexOf("#EXTINF:", 8)
+                if (nextToken >= 0) {
+                    val block = buffer.substring(0, nextToken)
+                    buffer.delete(0, nextToken)
+                    pendingInfo = processM3uBlock(block, pendingInfo, entries)
+                    continue
+                }
+                if (newline >= 0) {
+                    val line = buffer.substring(0, newline)
+                    buffer.delete(0, newline + 1)
+                    pendingInfo = processM3uLine(line, pendingInfo, entries)
+                    continue
+                }
+                if (buffer.length > MAX_FRAGMENT_CHARS) error("A entrada M3U ultrapassou o limite seguro")
+                break
             }
         }
-        return entries
+        if (buffer.isNotBlank()) processM3uBlock(buffer.toString(), pendingInfo, entries)
+    }
+
+    private fun processM3uBlock(block: String, pendingInfo: String?, entries: MutableList<CatalogEntry>): String? {
+        var nextPending = pendingInfo
+        block.split('\n').forEach { line -> nextPending = processM3uLine(line, nextPending, entries) }
+        return nextPending
+    }
+
+    private fun processM3uLine(raw: String, pendingInfo: String?, entries: MutableList<CatalogEntry>): String? {
+        val line = raw.replace("\r", "").trim()
+        if (line.isBlank()) return pendingInfo
+        if (line.startsWith("#EXTINF:")) {
+            val sameLineUrl = Regex("\\s+(https?://\\S+)$").find(line)
+            if (sameLineUrl != null) {
+                addEntry(entries, line.substring(0, sameLineUrl.range.first).trim(), sameLineUrl.groupValues[1])
+                return null
+            }
+            return line
+        }
+        if (pendingInfo != null && line.startsWith("http")) {
+            addEntry(entries, pendingInfo, line)
+            return null
+        }
+        return pendingInfo
     }
 
     private fun addEntry(target: MutableList<CatalogEntry>, info: String, streamUrl: String) {
@@ -138,26 +207,28 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun writeCache(entries: List<CatalogEntry>) {
-        val buffer = ByteArrayOutputStream()
-        GZIPOutputStream(buffer).bufferedWriter(Charsets.UTF_8).use { writer ->
+        GZIPOutputStream(cacheFile.outputStream().buffered()).bufferedWriter(Charsets.UTF_8).use { writer ->
             entries.forEach { entry ->
                 val fields = listOf(entry.key, entry.name, entry.groupTitle, entry.tvgId, entry.logoUrl, entry.streamUrl, entry.kind.name, entry.quality, entry.seriesGroup)
                 writer.append(fields.joinToString("\t") { encode(it) }).append('\n')
             }
         }
-        cacheFile.writeBytes(buffer.toByteArray())
     }
 
     private fun readCache(): List<CatalogEntry> {
         if (!cacheFile.exists()) return emptyList()
-        val bytes = GZIPInputStream(ByteArrayInputStream(cacheFile.readBytes())).bufferedReader(Charsets.UTF_8).use { it.readLines() }
-        return bytes.mapNotNull { line ->
-            val f = line.split('\t').map(::decode)
-            if (f.size < 9) return@mapNotNull null
-            runCatching {
-                CatalogEntry(f[0], f[1], f[2], f[3], f[4], f[5], MediaKind.valueOf(f[6]), f[7], f[8])
-            }.getOrNull()
+        val entries = ArrayList<CatalogEntry>()
+        GZIPInputStream(cacheFile.inputStream().buffered()).bufferedReader(Charsets.UTF_8).useLines { lines ->
+            lines.forEach { line ->
+                val f = line.split('\t').map(::decode)
+                if (f.size >= 9) {
+                    runCatching {
+                        entries += CatalogEntry(f[0], f[1], f[2], f[3], f[4], f[5], MediaKind.valueOf(f[6]), f[7], f[8])
+                    }
+                }
+            }
         }
+        return entries
     }
 
     private fun encode(value: String): String = Base64.encodeToString(value.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
