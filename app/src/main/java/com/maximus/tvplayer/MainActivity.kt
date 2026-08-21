@@ -209,22 +209,22 @@ class MainActivity : Activity() {
     private fun renderNavigation() {
         navItems.removeAllViews()
         val items = listOf(
-            "INÍCIO" to "⌂",
-            "CANAIS" to "◉",
-            "FILMES" to "▣",
-            "SÉRIES" to "▤",
-            "FAVORITOS" to "★",
-            "AJUSTES" to "⚙",
+            "INÍCIO" to R.drawable.ic_nav_home,
+            "CANAIS" to R.drawable.ic_nav_live,
+            "FILMES" to R.drawable.ic_nav_movies,
+            "SÉRIES" to R.drawable.ic_nav_series,
+            "FAVORITOS" to R.drawable.ic_nav_favorites,
+            "AJUSTES" to R.drawable.ic_nav_settings,
         )
-        items.forEachIndexed { index, (label, glyph) ->
-            lateinit var icon: TextView
+        items.forEachIndexed { index, (label, iconRes) ->
+            lateinit var icon: ImageView
             lateinit var caption: TextView
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
-                layoutParams = LinearLayout.LayoutParams(-1, 64).apply { setMargins(4, 2, 4, 2) }
+                layoutParams = LinearLayout.LayoutParams(-1, 82).apply { setMargins(2, 5, 2, 5) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO", "CANAIS" -> switchSection(MediaKind.LIVE)
@@ -236,29 +236,28 @@ class MainActivity : Activity() {
                 }
                 setOnFocusChangeListener { view, hasFocus ->
                     val active = hasFocus || isNavigationSelected(label)
-                    view.background = rounded(if (active) 0x333FE7EF else 0x00111629, 10f)
-                    icon.setTextColor(if (active) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
+                    view.background = rounded(if (active) 0x443FE7EF else 0x00111629, 12f)
+                    icon.setColorFilter(if (active) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
                     caption.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
                 }
             }
-            icon = TextView(this).apply {
-                text = glyph
-                gravity = Gravity.CENTER
-                textSize = 20f
-                setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
-                background = rounded(0x441B2036, 24f)
-                layoutParams = LinearLayout.LayoutParams(42, 38)
+            icon = ImageView(this).apply {
+                setImageResource(iconRes)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setColorFilter(if (isNavigationSelected(label) || index == 1) Color.rgb(255, 218, 130) else Color.rgb(190, 200, 230))
+                background = getDrawable(R.drawable.nav_icon_bg)
+                layoutParams = LinearLayout.LayoutParams(54, 50)
             }
             caption = TextView(this).apply {
                 text = label
                 gravity = Gravity.CENTER
                 textSize = 8f
                 setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 20)
+                layoutParams = LinearLayout.LayoutParams(-1, 22)
             }
             row.addView(icon)
             row.addView(caption)
-            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 10f)
+            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 12f)
             navItems.addView(row)
         }
     }
