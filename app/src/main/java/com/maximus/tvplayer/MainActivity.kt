@@ -495,19 +495,14 @@ class MainActivity : Activity() {
             hasTrailer -> "▶  Trailer • ${entry.name}"
             else -> "Poster • ${entry.name}"
         }
-        val heroSource = entry.backdropUrl.ifBlank { if (isLive) "" else entry.logoUrl }
+        val heroSource = entry.backdropUrl.ifBlank { entry.logoUrl }
         heroImage.setImageResource(fallbackHero(entry))
         if (heroSource.isBlank()) {
             heroImage.setImageResource(fallbackHero(entry))
         } else {
             imageLoader.load(heroSource, heroImage, fallbackHero(entry))
         }
-        previewLogo.visibility = if (entry.logoUrl.isNotBlank() || isLive) View.VISIBLE else View.GONE
-        if (entry.logoUrl.isNotBlank()) {
-            imageLoader.load(entry.logoUrl, previewLogo, fallbackLogo(entry))
-        } else {
-            previewLogo.setImageResource(fallbackLogo(entry))
-        }
+        previewLogo.visibility = View.GONE
         liveBadge.visibility = if (isLive || hasTrailer) View.VISIBLE else View.GONE
         liveBadge.text = if (isLive) "AO VIVO" else "TRAILER"
         detailEyebrow.text = if (isLive) editorial.eyebrow.uppercase() else kindLabel(entry.kind)

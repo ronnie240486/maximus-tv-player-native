@@ -15,7 +15,7 @@ class PlaylistRepository(private val context: Context) {
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
-        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)=\\\"([^\\\"]*)\\\"")
+        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*\\\"([^\\\"]*)\\\"", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
         private val SERIES_PATTERN = Regex("\\sS\\d+|\\sTemporada", RegexOption.IGNORE_CASE)
         private val SEASON_NAME_PATTERN = Regex("\\bs\\d{1,2}\\b", RegexOption.IGNORE_CASE)
@@ -106,7 +106,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
-        if (metadata.getInt("format_version", 0) != 2) return true
+        if (metadata.getInt("format_version", 0) != 3) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -117,7 +117,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 2).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 3).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -255,7 +255,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun addEntry(info: String, streamUrl: String, emit: (CatalogEntry) -> Unit) {
-        val attributes = ATTRIBUTE_PATTERN.findAll(info).associate { it.groupValues[1] to it.groupValues[2] }
+        val attributes = ATTRIBUTE_PATTERN.findAll(info).associate { it.groupValues[1].lowercase() to it.groupValues[2].trim() }
         val displayName = info.substringAfter(',', attributes["tvg-name"].orEmpty()).trim()
         if (displayName.isBlank() || streamUrl.isBlank()) return
         val group = attributes["group-title"].orEmpty().ifBlank { "Sem categoria" }
@@ -264,7 +264,7 @@ class PlaylistRepository(private val context: Context) {
         val synopsis = firstAttribute(attributes, "description", "tvg-desc", "tvg-description", "plot", "synopsis", "summary", "overview")
         val cast = firstAttribute(attributes, "cast", "actors", "actor", "elenco", "tvg-cast")
         val year = firstAttribute(attributes, "year", "release-year", "release_year", "date")
-        val backdrop = firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "background")
+        val backdrop = cleanAssetUrl(firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "fanart_url", "background", "background-url", "background_url", "banner", "banner-url", "banner_url", "art", "art-url", "art_url", "cover_big"))
         val trailer = firstAttribute(attributes, "trailer", "trailer-url", "trailer_url", "youtube-trailer", "youtube_trailer")
         val runtime = firstAttribute(attributes, "duration", "runtime", "length")
         emit(CatalogEntry(
@@ -272,7 +272,7 @@ class PlaylistRepository(private val context: Context) {
             name = displayName,
             groupTitle = group,
             tvgId = attributes["tvg-id"].orEmpty(),
-            logoUrl = attributes["tvg-logo"].orEmpty(),
+            logoUrl = cleanAssetUrl(firstAttribute(attributes, "tvg-logo", "logo", "logo-url", "logo_url", "poster", "poster-url", "poster_url", "cover", "cover-url", "cover_url", "thumb", "thumbnail", "image", "image-url", "image_url", "cover_big")),
             streamUrl = streamUrl,
             kind = kind,
             quality = quality,
@@ -287,9 +287,14 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun firstAttribute(attributes: Map<String, String>, vararg keys: String): String {
-        keys.forEach { key -> attributes[key]?.trim()?.takeIf { it.isNotBlank() }?.let { return it } }
+        keys.forEach { key -> attributes[key.lowercase()]?.trim()?.takeIf { it.isNotBlank() }?.let { return it } }
         return ""
     }
+
+    private fun cleanAssetUrl(value: String): String = value
+        .replace("&amp;", "&")
+        .replace("\\\\/", "/")
+        .trim()
 
     private fun classify(name: String, group: String): MediaKind {
         val normalizedGroup = group.lowercase().trim()
