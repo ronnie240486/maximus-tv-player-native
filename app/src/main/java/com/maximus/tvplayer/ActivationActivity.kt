@@ -8,11 +8,13 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import java.security.MessageDigest
@@ -23,11 +25,23 @@ class ActivationActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var verifyButton: TextView
     private lateinit var connectButton: TextView
+    private lateinit var connectionProgress: ProgressBar
+    private lateinit var connectionPercent: TextView
+    private lateinit var connectionClock: TextView
+    private lateinit var connectionMessage: TextView
     private var checking = false
+    private var loadingStartedAt = 0L
     private val integration = AppIntegrationRepository()
     private val playlistRepository by lazy { PlaylistRepository(this) }
     private val handler = Handler(Looper.getMainLooper())
     private var loadingPanelList = false
+    private val clockTicker = object : Runnable {
+        override fun run() {
+            updateClock()
+            handler.postDelayed(this, 1_000)
+        }
+    }
+
     private val periodicCheck = object : Runnable {
         override fun run() {
             verifyAccess(false)
@@ -55,13 +69,33 @@ class ActivationActivity : Activity() {
         status = findViewById(R.id.activationStatus)
         verifyButton = findViewById(R.id.recheckButton)
         connectButton = findViewById(R.id.connectButton)
+        connectionProgress = findViewById(R.id.connectionProgress)
+        connectionPercent = findViewById(R.id.connectionPercent)
+        connectionClock = findViewById(R.id.connectionClock)
+        connectionMessage = findViewById(R.id.connectionMessage)
+        loadingStartedAt = SystemClock.elapsedRealtime()
+        handler.post(clockTicker)
         macValue.setOnClickListener { copyMac() }
         macFormatted.setOnClickListener { copyMac() }
         findViewById<TextView>(R.id.copyMacButton).setOnClickListener { copyMac() }
         connectButton.setOnClickListener { verifyAccess(true) }
         verifyButton.setOnClickListener { verifyAccess(true) }
         connectButton.requestFocus()
+        setConnectionProgress(0, "Aguardando conexão com o painel...")
         verifyAccess(false)
+    }
+
+    private fun updateClock() {
+        if (!::connectionClock.isInitialized || loadingStartedAt == 0L) return
+        val elapsed = ((SystemClock.elapsedRealtime() - loadingStartedAt) / 1000L).coerceAtLeast(0L)
+        connectionClock.text = "◷ %02d:%02d".format(Locale.US, elapsed / 60, elapsed % 60)
+    }
+
+    private fun setConnectionProgress(value: Int, message: String) {
+        if (!::connectionProgress.isInitialized) return
+        connectionProgress.progress = value.coerceIn(0, 100)
+        connectionPercent.text = "${value.coerceIn(0, 100)}%"
+        connectionMessage.text = message
     }
 
     private fun copyMac() {
@@ -74,6 +108,7 @@ class ActivationActivity : Activity() {
         if (checking || loadingPanelList) return
         checking = true
         if (showProgress) status.text = "Consultando o painel..."
+        setConnectionProgress(10, "Conectando sua lista de filmes, séries e canais...")
         verifyButton.isEnabled = false
         connectButton.isEnabled = false
         integration.fetchConfig(mac) { result ->
@@ -83,16 +118,19 @@ class ActivationActivity : Activity() {
                 connectButton.isEnabled = true
                 result.onSuccess { config ->
                     if (!config.registered || !config.allowed) {
+                        setConnectionProgress(20, "Aguardando o cadastro deste MAC no painel...")
                         status.text = "Aguardando cadastro e liberação no painel..."
                         status.setTextColor(getColor(R.color.warning))
                         return@onSuccess
                     }
                     if (config.playlistUrls.isEmpty()) {
+                        setConnectionProgress(30, "MAC liberado. Aguardando a lista cadastrada no painel...")
                         status.text = "MAC liberado, aguardando a lista cadastrada no painel..."
                         status.setTextColor(getColor(R.color.warning))
                         return@onSuccess
                     }
                     loadingPanelList = true
+                    setConnectionProgress(60, "Lista encontrada. Conectando sua lista de filmes, séries e canais...")
                     verifyButton.isEnabled = false
                     connectButton.isEnabled = false
                     status.text = "Lista do painel encontrada. Carregando canais, filmes e séries..."
@@ -100,6 +138,7 @@ class ActivationActivity : Activity() {
                         runOnUiThread {
                             loadingPanelList = false
                             playlistResult.onSuccess {
+                                setConnectionProgress(100, "Conectado. Em breve você terá em mãos o melhor conteúdo para assistir.")
                                 status.text = "Conectado. Abrindo catálogo..."
                                 status.setTextColor(getColor(R.color.success))
                                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
@@ -113,6 +152,7 @@ class ActivationActivity : Activity() {
                             }.onFailure {
                                 verifyButton.isEnabled = true
                                 connectButton.isEnabled = true
+                                setConnectionProgress(40, "Não foi possível concluir o download da lista do painel.")
                                 val reason = it.message.orEmpty()
                                 status.text = if (reason.contains("HTTP 403")) {
                                     "MAC liberado, mas o servidor da lista recusou a conexão (HTTP 403). Verifique a lista no painel."
@@ -124,6 +164,7 @@ class ActivationActivity : Activity() {
                         }
                     }
                 }.onFailure {
+                    setConnectionProgress(20, "O painel não respondeu. Tentando novamente automaticamente...")
                     status.text = "Não foi possível consultar o painel. Toque em CONECTAR para tentar novamente."
                     status.setTextColor(getColor(R.color.warning))
                 }
@@ -144,6 +185,7 @@ class ActivationActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(clockTicker)
         playlistRepository.shutdown()
         integration.shutdown()
         super.onDestroy()
