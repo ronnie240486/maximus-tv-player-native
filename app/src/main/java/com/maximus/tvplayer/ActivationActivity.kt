@@ -98,6 +98,19 @@ class ActivationActivity : Activity() {
         connectionMessage.text = message
     }
 
+    private fun explainFailure(reason: String): String {
+        val safeReason = reason
+            .replace(Regex("([?&](username|password)=)[^&\\s]+", RegexOption.IGNORE_CASE), "$1***")
+            .replace(Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE), "servidor da lista")
+        return when {
+            reason.contains("403") -> "A lista foi recusada pelo servidor (HTTP 403). Verifique a URL/credenciais no painel."
+            reason.contains("timeout", true) || reason.contains("timed out", true) -> "O servidor da lista demorou demais para responder."
+            reason.contains("HTML", true) -> "O servidor devolveu uma página de bloqueio, não uma lista M3U."
+            safeReason.isNotBlank() -> "Falha ao baixar a lista do painel: $safeReason"
+            else -> "Falha ao baixar a lista do painel."
+        }
+    }
+
     private fun copyMac() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("MAC do dispositivo", mac))
@@ -152,13 +165,10 @@ class ActivationActivity : Activity() {
                             }.onFailure {
                                 verifyButton.isEnabled = true
                                 connectButton.isEnabled = true
-                                setConnectionProgress(40, "Não foi possível concluir o download da lista do painel.")
                                 val reason = it.message.orEmpty()
-                                status.text = if (reason.contains("HTTP 403")) {
-                                    "MAC liberado, mas o servidor da lista recusou a conexão (HTTP 403). Verifique a lista no painel."
-                                } else {
-                                    "A lista do painel não pôde ser carregada. Toque em CONECTAR para tentar novamente."
-                                }
+                                val message = explainFailure(reason)
+                                setConnectionProgress(40, message)
+                                status.text = message
                                 status.setTextColor(getColor(R.color.warning))
                             }
                         }
