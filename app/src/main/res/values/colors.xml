@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#080B16</color>
+    <color name="surface">#121629</color>
+    <color name="surface_alt">#1B2036</color>
+    <color name="surface_selected">#2B3047</color>
+    <color name="cyan">#4CE8F0</color>
+    <color name="magenta">#F47B9C</color>
+    <color name="white">#FFFFFF</color>
+    <color name="text_secondary">#AAB1C7</color>
+    <color name="text_muted">#6F7895</color>
+    <color name="divider">#28304A</color>
+    <color name="black">#05060A</color>
+</resources>
