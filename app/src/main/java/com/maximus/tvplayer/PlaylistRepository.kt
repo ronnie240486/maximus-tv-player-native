@@ -7,7 +7,6 @@ import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.LinkedHashMap
 import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
@@ -24,68 +23,84 @@ class PlaylistRepository(private val context: Context) {
     private val executor = Executors.newSingleThreadExecutor()
     private val cacheFile = File(context.filesDir, "catalog-cache.tsv.gz")
     private val metadata = context.getSharedPreferences("playlist_cache_metadata", Context.MODE_PRIVATE)
+    private val database = CatalogDatabase(context)
 
     fun load(url: String, callback: (Result<CatalogSnapshot>) -> Unit) = load(listOf(url), callback)
 
     fun load(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
-            val result = runCatching {
-                downloadAndCache(urls)
-            }.recoverCatching {
-                val cached = readCache()
-                if (cached.isEmpty()) throw it
-                CatalogSnapshot(cached, loadedFromCache = true)
+            val result = runCatching { downloadAndCache(urls) }.recoverCatching {
+                val stats = database.stats()
+                if (stats.total == 0) throw it
+                CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = stats.total, groupCount = stats.groups, databaseBacked = true)
             }
             callback(result)
         }
     }
 
     fun loadRemoteOnly(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
-        executor.execute {
-            callback(runCatching { downloadAndCache(urls) })
-        }
+        executor.execute { callback(runCatching { downloadAndCache(urls) }) }
     }
 
-    fun loadIfChanged(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
+    fun loadIfChanged(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) = loadIfChanged(urls, {}, callback)
+
+    fun loadIfChanged(urls: List<String>, onProgress: (Int) -> Unit, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
             callback(runCatching {
                 val normalized = normalizeUrls(urls)
-                val cached = readCache()
-                if (cached.isNotEmpty() && !sourceChanged(normalized)) {
-                    CatalogSnapshot(cached, loadedFromCache = true)
+                val stats = database.stats()
+                if (stats.total > 0 && !sourceChanged(normalized)) {
+                    onProgress(100)
+                    CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = stats.total, groupCount = stats.groups, databaseBacked = true)
                 } else {
-                    downloadAndCache(normalized)
+                    downloadAndCache(normalized, onProgress)
                 }
             })
         }
     }
 
-    private fun fetchUrls(urls: List<String>): List<CatalogEntry> {
-        val unique = LinkedHashMap<String, CatalogEntry>()
-        urls.filter { it.isNotBlank() }.forEach { url ->
-            fetchAndParse(url.trim()).forEach { entry -> unique.putIfAbsent(entry.key, entry) }
-        }
-        return unique.values.toList()
-    }
-
     fun loadCached(callback: (CatalogSnapshot?) -> Unit) {
         executor.execute {
-            callback(runCatching { readCache() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { CatalogSnapshot(it, true) })
+            val stats = runCatching { database.stats() }.getOrNull()
+            callback(stats?.takeIf { it.total > 0 }?.let { CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = it.total, groupCount = it.groups, databaseBacked = true) })
+        }
+    }
+
+    fun queryGroups(kind: MediaKind, hidden: Set<String>, callback: (List<String>) -> Unit) {
+        executor.execute { callback(runCatching { database.groups(kind, hidden) }.getOrDefault(emptyList())) }
+    }
+
+    fun queryPage(
+        kind: MediaKind?,
+        group: String,
+        search: String,
+        hidden: Set<String>,
+        favorites: Set<String>,
+        sortAlphabetically: Boolean,
+        limit: Int,
+        offset: Int,
+        callback: (List<CatalogEntry>) -> Unit,
+    ) {
+        executor.execute {
+            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset) }.getOrDefault(emptyList()))
         }
     }
 
     fun clearCache() {
         cacheFile.delete()
+        database.clear()
         metadata.edit().clear().apply()
     }
 
-    private fun downloadAndCache(urls: List<String>): CatalogSnapshot {
+    private fun downloadAndCache(urls: List<String>): CatalogSnapshot = downloadAndCache(urls, {})
+
+    private fun downloadAndCache(urls: List<String>, onProgress: (Int) -> Unit): CatalogSnapshot {
         val normalized = normalizeUrls(urls)
-        val parsed = fetchUrls(normalized)
-        if (parsed.isEmpty()) error("A lista do painel está vazia ou indisponível")
-        writeCache(parsed)
+        val stats = database.replaceStreaming({ emit -> streamUrls(normalized, emit) }, onProgress)
+        if (stats.total == 0) error("A lista do painel está vazia ou indisponível")
+        onProgress(100)
         saveSourceMetadata(normalized)
-        return CatalogSnapshot(parsed)
+        return CatalogSnapshot(emptyList(), totalCount = stats.total, groupCount = stats.groups, databaseBacked = true)
     }
 
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
@@ -126,9 +141,16 @@ class PlaylistRepository(private val context: Context) {
 
     fun shutdown() {
         executor.shutdownNow()
+        database.close()
     }
 
-    private fun fetchAndParse(urlString: String): List<CatalogEntry> {
+    private fun streamUrls(urls: List<String>, emit: (CatalogEntry) -> Unit) {
+        var total = 0
+        urls.forEach { url -> total += fetchAndParse(url, emit) }
+        if (total == 0) error("A lista do painel não contém entradas M3U válidas")
+    }
+
+    private fun fetchAndParse(urlString: String, emit: (CatalogEntry) -> Unit): Int {
         val connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 20_000
@@ -148,16 +170,16 @@ class PlaylistRepository(private val context: Context) {
             connection.disconnect()
             error("A lista do painel não retornou conteúdo")
         }
-        val entries = ArrayList<CatalogEntry>()
+        var count = 0
         input.bufferedReader(Charsets.UTF_8).use { reader ->
-            parseM3uStream(reader, entries)
+            parseM3uStream(reader) { entry -> count++; emit(entry) }
         }
         connection.disconnect()
-        if (entries.isEmpty()) error("A lista do painel não contém entradas M3U válidas")
-        return entries
+        if (count == 0) error("A lista do painel não contém entradas M3U válidas")
+        return count
     }
 
-    private fun parseM3uStream(reader: java.io.Reader, entries: MutableList<CatalogEntry>) {
+    private fun parseM3uStream(reader: java.io.Reader, emit: (CatalogEntry) -> Unit) {
         val buffer = StringBuilder()
         val chunk = CharArray(32 * 1024)
         var pendingInfo: String? = null
@@ -172,7 +194,7 @@ class PlaylistRepository(private val context: Context) {
                     if (newline >= 0) {
                         val line = buffer.substring(0, newline)
                         buffer.delete(0, newline + 1)
-                        pendingInfo = processM3uLine(line, pendingInfo, entries)
+                        pendingInfo = processM3uLine(line, pendingInfo, emit)
                         continue
                     }
                     if (buffer.length > MAX_FRAGMENT_CHARS) error("A lista M3U contém uma linha inválida muito grande")
@@ -182,7 +204,7 @@ class PlaylistRepository(private val context: Context) {
                     if (newline >= 0 && newline < token) {
                         val line = buffer.substring(0, newline)
                         buffer.delete(0, newline + 1)
-                        pendingInfo = processM3uLine(line, pendingInfo, entries)
+                        pendingInfo = processM3uLine(line, pendingInfo, emit)
                     } else {
                         buffer.delete(0, token)
                     }
@@ -192,47 +214,47 @@ class PlaylistRepository(private val context: Context) {
                 if (nextToken >= 0) {
                     val block = buffer.substring(0, nextToken)
                     buffer.delete(0, nextToken)
-                    pendingInfo = processM3uBlock(block, pendingInfo, entries)
+                    pendingInfo = processM3uBlock(block, pendingInfo, emit)
                     continue
                 }
                 if (newline >= 0) {
                     val line = buffer.substring(0, newline)
                     buffer.delete(0, newline + 1)
-                    pendingInfo = processM3uLine(line, pendingInfo, entries)
+                    pendingInfo = processM3uLine(line, pendingInfo, emit)
                     continue
                 }
                 if (buffer.length > MAX_FRAGMENT_CHARS) error("A entrada M3U ultrapassou o limite seguro")
                 break
             }
         }
-        if (buffer.isNotBlank()) processM3uBlock(buffer.toString(), pendingInfo, entries)
+        if (buffer.isNotBlank()) processM3uBlock(buffer.toString(), pendingInfo, emit)
     }
 
-    private fun processM3uBlock(block: String, pendingInfo: String?, entries: MutableList<CatalogEntry>): String? {
+    private fun processM3uBlock(block: String, pendingInfo: String?, emit: (CatalogEntry) -> Unit): String? {
         var nextPending = pendingInfo
-        block.split('\n').forEach { line -> nextPending = processM3uLine(line, nextPending, entries) }
+        block.split('\n').forEach { line -> nextPending = processM3uLine(line, nextPending, emit) }
         return nextPending
     }
 
-    private fun processM3uLine(raw: String, pendingInfo: String?, entries: MutableList<CatalogEntry>): String? {
+    private fun processM3uLine(raw: String, pendingInfo: String?, emit: (CatalogEntry) -> Unit): String? {
         val line = raw.replace("\r", "").trim()
         if (line.isBlank()) return pendingInfo
         if (line.startsWith("#EXTINF:")) {
             val sameLineUrl = SAME_LINE_URL_PATTERN.find(line)
             if (sameLineUrl != null) {
-                addEntry(entries, line.substring(0, sameLineUrl.range.first).trim(), sameLineUrl.groupValues[1])
+                addEntry(line.substring(0, sameLineUrl.range.first).trim(), sameLineUrl.groupValues[1], emit)
                 return null
             }
             return line
         }
         if (pendingInfo != null && line.startsWith("http")) {
-            addEntry(entries, pendingInfo, line)
+            addEntry(pendingInfo, line, emit)
             return null
         }
         return pendingInfo
     }
 
-    private fun addEntry(target: MutableList<CatalogEntry>, info: String, streamUrl: String) {
+    private fun addEntry(info: String, streamUrl: String, emit: (CatalogEntry) -> Unit) {
         val attributes = ATTRIBUTE_PATTERN.findAll(info).associate { it.groupValues[1] to it.groupValues[2] }
         val displayName = info.substringAfter(',', attributes["tvg-name"].orEmpty()).trim()
         if (displayName.isBlank() || streamUrl.isBlank()) return
@@ -245,7 +267,7 @@ class PlaylistRepository(private val context: Context) {
         val backdrop = firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "background")
         val trailer = firstAttribute(attributes, "trailer", "trailer-url", "trailer_url", "youtube-trailer", "youtube_trailer")
         val runtime = firstAttribute(attributes, "duration", "runtime", "length")
-        target += CatalogEntry(
+        emit(CatalogEntry(
             key = "${attributes["tvg-id"].orEmpty()}|$streamUrl",
             name = displayName,
             groupTitle = group,
@@ -261,7 +283,7 @@ class PlaylistRepository(private val context: Context) {
             backdropUrl = backdrop,
             trailerUrl = trailer,
             runtime = runtime,
-        )
+        ))
     }
 
     private fun firstAttribute(attributes: Map<String, String>, vararg keys: String): String {

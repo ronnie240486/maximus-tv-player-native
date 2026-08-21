@@ -25,6 +25,13 @@ class CatalogAdapter(
         notifyDataSetChanged()
     }
 
+    fun append(items: List<CatalogEntry>) {
+        if (items.isEmpty()) return
+        val start = this.items.size
+        this.items = this.items + items
+        notifyItemRangeInserted(start, items.size)
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val context = parent.context
         val row = LinearLayout(context).apply {

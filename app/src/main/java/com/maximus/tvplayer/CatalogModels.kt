@@ -29,6 +29,9 @@ data class CatalogEntry(
 data class CatalogSnapshot(
     val entries: List<CatalogEntry>,
     val loadedFromCache: Boolean = false,
+    val totalCount: Int = entries.size,
+    val groupCount: Int = entries.map { it.groupTitle }.distinct().size,
+    val databaseBacked: Boolean = false,
 ) {
     val live: List<CatalogEntry> get() = entries.filter { it.kind == MediaKind.LIVE }
     val movies: List<CatalogEntry> get() = entries.filter { it.kind == MediaKind.MOVIE }

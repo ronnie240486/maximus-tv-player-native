@@ -36,6 +36,7 @@ private data class ChannelEditorial(
 )
 
 class MainActivity : Activity() {
+    private val pageSize = 120
     private lateinit var channelList: RecyclerView
     private lateinit var categoryList: LinearLayout
     private lateinit var navItems: LinearLayout
@@ -68,6 +69,11 @@ class MainActivity : Activity() {
     private var epgByChannel: Map<String, List<EpgProgram>> = emptyMap()
     private lateinit var catalogAdapter: CatalogAdapter
     private var catalog = CatalogSnapshot(emptyList())
+    private var databaseBackedCatalog = false
+    private val pagedItems = ArrayList<CatalogEntry>()
+    private var pageLoading = false
+    private var pageFinished = false
+    private var pageRequestId = 0
     private var selectedEntry: CatalogEntry? = null
     private var selectedCategory = "Todos"
     private var query = ""
@@ -187,6 +193,13 @@ class MainActivity : Activity() {
         )
         channelList.layoutManager = LinearLayoutManager(this)
         channelList.adapter = catalogAdapter
+        channelList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                val manager = recyclerView.layoutManager as? LinearLayoutManager ?: return
+                if (manager.findLastVisibleItemPosition() >= catalogAdapter.itemCount - 12) loadNextPage()
+            }
+        })
     }
 
     private fun renderNavigation() {
@@ -258,8 +271,22 @@ class MainActivity : Activity() {
     }
 
     private fun renderCategories() {
+        if (databaseBackedCatalog) {
+            categoryList.removeAllViews()
+            renderCategoryButtons(listOf("Todos"))
+            val requestKind = currentKind
+            repository.queryGroups(requestKind, hiddenGroups()) { groups ->
+                runOnUiThread {
+                    if (databaseBackedCatalog && currentKind == requestKind) renderCategoryButtons(listOf("Todos") + groups)
+                }
+            }
+            return
+        }
+        renderCategoryButtons(listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted())
+    }
+
+    private fun renderCategoryButtons(categories: List<String>) {
         categoryList.removeAllViews()
-        val categories = listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted()
         categories.forEach { category ->
             val item = TextView(this).apply {
                 text = category
@@ -286,7 +313,51 @@ class MainActivity : Activity() {
     }
 
     private fun renderCatalog() {
-        catalogAdapter.submit(visibleItems(), selectedEntry?.key)
+        if (!databaseBackedCatalog) {
+            catalogAdapter.submit(visibleItems(), selectedEntry?.key)
+            return
+        }
+        pageRequestId++
+        pagedItems.clear()
+        pageLoading = false
+        pageFinished = false
+        catalogAdapter.submit(emptyList(), selectedEntry?.key)
+        loadNextPage()
+    }
+
+    private fun loadNextPage() {
+        if (!databaseBackedCatalog || pageLoading || pageFinished) return
+        pageLoading = true
+        val requestId = pageRequestId
+        val offset = pagedItems.size
+        repository.queryPage(
+            kind = if (favoritesOnly) null else currentKind,
+            group = selectedCategory,
+            search = query,
+            hidden = hiddenGroups(),
+            favorites = if (favoritesOnly) favorites() else emptySet(),
+            sortAlphabetically = sortAlphabetically,
+            limit = pageSize,
+            offset = offset,
+        ) { page ->
+            runOnUiThread {
+                if (requestId != pageRequestId) return@runOnUiThread
+                pageLoading = false
+                if (page.isEmpty()) {
+                    pageFinished = true
+                    if (offset == 0) selectedEntry = null
+                    return@runOnUiThread
+                }
+                pagedItems.addAll(page)
+                if (offset == 0) {
+                    catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
+                    if (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key }) selectEntry(page.first(), false)
+                } else {
+                    catalogAdapter.append(page)
+                }
+                if (page.size < pageSize) pageFinished = true
+            }
+        }
     }
 
     private fun currentItems(): List<CatalogEntry> {
@@ -309,8 +380,23 @@ class MainActivity : Activity() {
     }
 
     private fun selectFirstVisible() {
-        val first = visibleItems().firstOrNull() ?: return
-        selectEntry(first, false)
+        if (databaseBackedCatalog) {
+            val requestId = pageRequestId
+            repository.queryPage(
+                kind = if (favoritesOnly) null else currentKind,
+                group = selectedCategory,
+                search = query,
+                hidden = hiddenGroups(),
+                favorites = if (favoritesOnly) favorites() else emptySet(),
+                sortAlphabetically = sortAlphabetically,
+                limit = 1,
+                offset = 0,
+            ) { page ->
+                runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
+            }
+            return
+        }
+        visibleItems().firstOrNull()?.let { selectEntry(it, false) }
     }
 
     private fun selectEntry(entry: CatalogEntry, requestFocus: Boolean) {
@@ -354,7 +440,7 @@ class MainActivity : Activity() {
         } else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
         if (requestFocus) channelList.requestFocus()
-        renderCatalog()
+        if (!databaseBackedCatalog) renderCatalog() else catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
     }
 
     private fun renderActions(entry: CatalogEntry) {
@@ -493,20 +579,10 @@ class MainActivity : Activity() {
             }
         }
         if (config.playlistUrls.isNotEmpty()) {
-            repository.loadCached { cached ->
+            repository.loadIfChanged(config.playlistUrls) { result ->
                 runOnUiThread {
-                    if (cached != null && cached.entries.isNotEmpty()) {
-                        applyCatalogSnapshot(cached, config)
-                    } else {
-                        repository.loadIfChanged(config.playlistUrls) { result ->
-                            runOnUiThread {
-                                result.onSuccess { loaded -> applyCatalogSnapshot(loaded, config) }
-                                    .onFailure {
-                                        showCatalogUnavailable("A lista do painel não está disponível nesta TV Box.")
-                                    }
-                            }
-                        }
-                    }
+                    result.onSuccess { loaded -> applyCatalogSnapshot(loaded, config) }
+                        .onFailure { showCatalogUnavailable("A lista do painel não está disponível nesta TV Box.") }
                 }
             }
         } else {
@@ -518,12 +594,13 @@ class MainActivity : Activity() {
     }
 
     private fun applyCatalogSnapshot(snapshot: CatalogSnapshot, config: RemoteAppConfig) {
-        if (snapshot.entries.isEmpty()) {
+        if (snapshot.totalCount <= 0) {
             showCatalogUnavailable("A lista do painel foi recebida vazia.")
             return
         }
         catalog = snapshot
-        greeting.text = "Olá, usuário  •  ${snapshot.entries.size} itens"
+        databaseBackedCatalog = snapshot.databaseBacked
+        greeting.text = "Olá, usuário  •  ${snapshot.totalCount} itens"
         currentKind = MediaKind.LIVE
         favoritesOnly = false
         selectedCategory = "Todos"
@@ -535,7 +612,9 @@ class MainActivity : Activity() {
     }
 
     private fun showCatalogUnavailable(message: String) {
+        databaseBackedCatalog = false
         catalog = CatalogSnapshot(emptyList())
+        pagedItems.clear()
         selectedEntry = null
         renderCategories()
         renderCatalog()
@@ -619,7 +698,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSettingsDialog() {
-        val message = "Catálogo recebido do painel pelo MAC.\\n\\n${catalog.entries.size} itens disponíveis em ${catalog.groups.size} grupos."
+        val message = "Catálogo recebido do painel pelo MAC.\\n\\n${catalog.totalCount} itens disponíveis em ${catalog.groupCount} grupos."
         AlertDialog.Builder(this)
             .setTitle("Ajustes do Excellence")
             .setMessage(message)
