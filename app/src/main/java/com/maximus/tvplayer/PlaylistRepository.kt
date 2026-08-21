@@ -15,6 +15,11 @@ import java.util.zip.GZIPOutputStream
 class PlaylistRepository(private val context: Context) {
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
+        private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
+        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)=\\\"([^\\\"]*)\\\"")
+        private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
+        private val SERIES_PATTERN = Regex("\\sS\\d+|\\sTemporada", RegexOption.IGNORE_CASE)
+        private val SEASON_NAME_PATTERN = Regex("\\bs\\d{1,2}\\b", RegexOption.IGNORE_CASE)
     }
     private val executor = Executors.newSingleThreadExecutor()
     private val cacheFile = File(context.filesDir, "catalog-cache.tsv.gz")
@@ -213,7 +218,7 @@ class PlaylistRepository(private val context: Context) {
         val line = raw.replace("\r", "").trim()
         if (line.isBlank()) return pendingInfo
         if (line.startsWith("#EXTINF:")) {
-            val sameLineUrl = Regex("\\s+(https?://\\S+)$").find(line)
+            val sameLineUrl = SAME_LINE_URL_PATTERN.find(line)
             if (sameLineUrl != null) {
                 addEntry(entries, line.substring(0, sameLineUrl.range.first).trim(), sameLineUrl.groupValues[1])
                 return null
@@ -228,12 +233,12 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun addEntry(target: MutableList<CatalogEntry>, info: String, streamUrl: String) {
-        val attributes = Regex("([\\w-]+)=\"([^\"]*)\"").findAll(info).associate { it.groupValues[1] to it.groupValues[2] }
+        val attributes = ATTRIBUTE_PATTERN.findAll(info).associate { it.groupValues[1] to it.groupValues[2] }
         val displayName = info.substringAfter(',', attributes["tvg-name"].orEmpty()).trim()
         if (displayName.isBlank() || streamUrl.isBlank()) return
         val group = attributes["group-title"].orEmpty().ifBlank { "Sem categoria" }
         val kind = classify(displayName, group)
-        val quality = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE).find(displayName)?.value?.uppercase().orEmpty()
+        val quality = QUALITY_PATTERN.find(displayName)?.value?.uppercase().orEmpty()
         val synopsis = firstAttribute(attributes, "description", "tvg-desc", "tvg-description", "plot", "synopsis", "summary", "overview")
         val cast = firstAttribute(attributes, "cast", "actors", "actor", "elenco", "tvg-cast")
         val year = firstAttribute(attributes, "year", "release-year", "release_year", "date")
@@ -249,7 +254,7 @@ class PlaylistRepository(private val context: Context) {
             streamUrl = streamUrl,
             kind = kind,
             quality = quality,
-            seriesGroup = if (kind == MediaKind.SERIES) displayName.split(Regex("\\sS\\d+|\\sTemporada")).first() else "",
+            seriesGroup = if (kind == MediaKind.SERIES) displayName.split(SERIES_PATTERN).first() else "",
             year = year,
             synopsis = synopsis,
             cast = cast,
@@ -271,7 +276,7 @@ class PlaylistRepository(private val context: Context) {
         if (normalizedGroup.startsWith("series |")) return MediaKind.SERIES
         if (normalizedGroup.contains("24/7 filmes") || normalizedGroup.contains("24/7 seriados") || normalizedGroup.contains("24/7 doramas") || normalizedGroup.contains("24/7 animes") || normalizedGroup.contains("24/7 novelas")) return MediaKind.LIVE
         if (normalizedGroup == "filmes e séries" || normalizedGroup == "filmes e series") return MediaKind.LIVE
-        if (normalizedName.contains("temporada") || Regex("\\bs\\d{1,2}\\b").containsMatchIn(normalizedName)) return MediaKind.SERIES
+        if (normalizedName.contains("temporada") || SEASON_NAME_PATTERN.containsMatchIn(normalizedName)) return MediaKind.SERIES
         if (normalizedName.contains("filme") || normalizedName.contains("movie")) return MediaKind.MOVIE
         return MediaKind.LIVE
     }
