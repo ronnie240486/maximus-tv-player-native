@@ -39,31 +39,31 @@ class CatalogAdapter(
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isClickable = true
-            setPadding(10, 8, 10, 8)
-            layoutParams = RecyclerView.LayoutParams(-1, 72).apply { setMargins(0, 3, 0, 3) }
+            setPadding(12, 10, 12, 10)
+            layoutParams = RecyclerView.LayoutParams(-1, 92).apply { setMargins(0, 5, 0, 5) }
         }
         val logo = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            layoutParams = LinearLayout.LayoutParams(48, 48).apply { setMargins(0, 0, 8, 0) }
+            layoutParams = LinearLayout.LayoutParams(68, 68).apply { setMargins(0, 0, 12, 0) }
         }
         val number = TextView(context).apply {
             setTextColor(Color.rgb(111, 120, 149))
-            textSize = 10f
+            textSize = 11f
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(28, -1)
+            layoutParams = LinearLayout.LayoutParams(34, -1)
         }
         val title = TextView(context).apply {
             setTextColor(Color.WHITE)
-            textSize = 13f
-            maxLines = 1
+            textSize = 16f
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
         }
         val badge = TextView(context).apply {
             setTextColor(Color.rgb(244, 123, 156))
-            textSize = 8f
-            setPadding(5, 3, 5, 3)
+            textSize = 10f
+            setPadding(8, 5, 8, 5)
             layoutParams = LinearLayout.LayoutParams(-2, -2)
         }
         row.addView(logo)

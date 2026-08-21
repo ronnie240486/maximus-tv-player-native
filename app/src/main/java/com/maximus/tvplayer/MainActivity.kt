@@ -248,7 +248,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
-                layoutParams = LinearLayout.LayoutParams(-1, 64).apply { setMargins(4, 2, 4, 2) }
+                layoutParams = LinearLayout.LayoutParams(-1, 92).apply { setMargins(4, 6, 4, 6) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -269,17 +269,17 @@ class MainActivity : Activity() {
             icon = TextView(this).apply {
                 text = glyph
                 gravity = Gravity.CENTER
-                textSize = 20f
+                textSize = 26f
                 setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
                 background = rounded(0x441B2036, 24f)
-                layoutParams = LinearLayout.LayoutParams(42, 38)
+                layoutParams = LinearLayout.LayoutParams(58, 54).apply { setMargins(0, 0, 0, 4) }
             }
             caption = TextView(this).apply {
                 text = label
                 gravity = Gravity.CENTER
-                textSize = 8f
+                textSize = 10f
                 setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 20)
+                layoutParams = LinearLayout.LayoutParams(-1, 24)
             }
             row.addView(icon)
             row.addView(caption)

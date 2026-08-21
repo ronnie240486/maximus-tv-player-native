@@ -59,14 +59,21 @@
                 android:textColor="@color/text_muted"
                 android:textSize="8sp" />
 
-            <LinearLayout
-                android:id="@+id/navItems"
+            <ScrollView
+                android:id="@+id/navScroll"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_marginTop="24dp"
                 android:layout_weight="1"
-                android:gravity="center_horizontal"
-                android:orientation="vertical" />
+                android:fillViewport="false"
+                android:scrollbars="vertical">
+                <LinearLayout
+                    android:id="@+id/navItems"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical" />
+            </ScrollView>
 
             <TextView
                 android:id="@+id/profileInitial"
@@ -239,7 +246,7 @@
                 <FrameLayout
                     android:id="@+id/videoPreview"
                     android:layout_width="match_parent"
-                    android:layout_height="285dp"
+                    android:layout_height="220dp"
                     android:background="@drawable/tv_banner"
                     android:focusable="true">
 
@@ -304,7 +311,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
                         android:textColor="@color/white"
-                        android:textSize="28sp"
+                        android:textSize="23sp"
                         android:textStyle="bold" />
 
                     <TextView
@@ -332,7 +339,9 @@
                         android:layout_marginTop="6dp"
                         android:lineSpacingExtra="3dp"
                         android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
+                        android:textSize="12sp"
+                        android:maxLines="4"
+                        android:ellipsize="end" />
 
                     <LinearLayout
                         android:id="@+id/nowCard"
