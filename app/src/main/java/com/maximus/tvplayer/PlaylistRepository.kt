@@ -36,6 +36,18 @@ class PlaylistRepository(private val context: Context) {
         }
     }
 
+    fun loadRemoteOnly(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
+        executor.execute {
+            callback(runCatching {
+                val parsed = urls.filter { it.isNotBlank() }.flatMap { fetchAndParse(it.trim()) }
+                    .distinctBy { it.key }
+                if (parsed.isEmpty()) error("A lista do painel está vazia ou indisponível")
+                writeCache(parsed)
+                CatalogSnapshot(parsed)
+            })
+        }
+    }
+
     fun loadCached(callback: (CatalogSnapshot?) -> Unit) {
         executor.execute {
             callback(runCatching { readCache() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { CatalogSnapshot(it, true) })

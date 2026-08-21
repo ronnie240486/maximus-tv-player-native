@@ -143,7 +143,6 @@ class MainActivity : Activity() {
         renderCatalog()
         selectedEntry = catalog.entries.firstOrNull()
         selectedEntry?.let { selectEntry(it, false) }
-        loadConfiguredPlaylist()
         loadRemoteConfiguration()
     }
 
@@ -369,8 +368,8 @@ class MainActivity : Activity() {
 
     private fun openEntry(entry: CatalogEntry) {
         if (entry.streamUrl.isBlank()) {
-            Toast.makeText(this, "Configure uma playlist M3U para assistir este conteúdo", Toast.LENGTH_SHORT).show()
-            showPlaylistDialog()
+            Toast.makeText(this, "Este item não possui URL válida na lista do painel", Toast.LENGTH_SHORT).show()
+            loadRemoteConfiguration()
             return
         }
         startActivity(Intent(this, PlayerActivity::class.java).apply {
@@ -450,8 +449,6 @@ class MainActivity : Activity() {
             }
         }
         if (config.playlistUrls.isNotEmpty()) {
-            val raw = config.playlistUrls.joinToString("\\n")
-            getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, raw).apply()
             repository.load(config.playlistUrls) { result ->
                 runOnUiThread {
                     result.onSuccess {
@@ -506,8 +503,8 @@ class MainActivity : Activity() {
     private fun executeRemoteCommand(mac: String, command: RemoteCommand) {
         when (command.command.lowercase()) {
             "refresh_playlist" -> {
-                loadConfiguredPlaylist()
-                appIntegration.ackCommand(mac, command.id, "executed", "Playlist atualizada")
+                loadRemoteConfiguration()
+                appIntegration.ackCommand(mac, command.id, "executed", "Playlist atualizada pelo painel")
             }
             "switch_playlist" -> {
                 val url = command.payload.optString("url")
@@ -553,24 +550,19 @@ class MainActivity : Activity() {
     }
 
     private fun showSettingsDialog() {
-        val url = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
-        val message = if (url.isBlank()) {
-            "Nenhuma playlist configurada.\n\nO aplicativo aceita M3U Plus e usa cache local para acelerar a abertura."
-        } else {
-            "Playlist configurada.\n\n${catalog.entries.size} itens disponíveis em ${catalog.groups.size} grupos."
-        }
+        val message = "Catálogo recebido do painel pelo MAC.\\n\\n${catalog.entries.size} itens disponíveis em ${catalog.groups.size} grupos."
         AlertDialog.Builder(this)
-            .setTitle("Ajustes do catálogo")
+            .setTitle("Ajustes do Excellence")
             .setMessage(message)
-            .setItems(arrayOf("Configurar M3U", "Categorias ocultas e ordem", "Configurar MAC", "Testar API do Servidor", "Limpar cache")) { _, which ->
+            .setItems(arrayOf("Categorias ocultas e ordem", "Recarregar catálogo do painel", "Testar API do Servidor", "Limpar cache local")) { _, which ->
                 when (which) {
-                    0 -> showPlaylistDialog()
-                    1 -> showCatalogRulesDialog()
-                    2 -> showMacDialog()
-                    3 -> showServerTestDialog()
-                    4 -> {
+                    0 -> showCatalogRulesDialog()
+                    1 -> loadRemoteConfiguration()
+                    2 -> showServerTestDialog()
+                    3 -> {
                         repository.clearCache()
-                        Toast.makeText(this, "Cache limpo", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Cache local limpo; a próxima consulta virá do painel", Toast.LENGTH_SHORT).show()
+                        loadRemoteConfiguration()
                     }
                 }
             }
@@ -667,69 +659,6 @@ class MainActivity : Activity() {
             }
             .show()
     }
-
-    private fun showPlaylistDialog() {
-        val input = EditText(this).apply {
-            hint = "https://servidor/playlist.m3u"
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setText(getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_PLAYLIST_URL, ""))
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Playlist M3U Plus")
-            .setMessage("Cole uma ou mais URLs M3U Plus, uma por linha. As credenciais ficam somente neste dispositivo.")
-            .setView(input)
-            .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Carregar") { _, _ ->
-                val rawUrls = input.text.toString().trim()
-                val urls = configuredUrls(rawUrls)
-                if (urls.isEmpty()) return@setPositiveButton
-                getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, rawUrls).apply()
-                Toast.makeText(this, "Carregando catálogo...", Toast.LENGTH_SHORT).show()
-                repository.load(urls) { result ->
-                    runOnUiThread {
-                        result.onSuccess {
-                            catalog = it
-                            greeting.text = "Olá, usuário  •  ${it.entries.size} itens"
-                            currentKind = MediaKind.LIVE
-                            favoritesOnly = false
-                            selectedCategory = "Todos"
-                            renderNavigation()
-                            renderCategories()
-                            renderCatalog()
-                            selectFirstVisible()
-                            loadDerivedEpg(urls.firstOrNull())
-                            Toast.makeText(this, "Catálogo carregado: ${it.entries.size} itens", Toast.LENGTH_LONG).show()
-                        }.onFailure {
-                            Toast.makeText(this, "Não foi possível carregar a playlist: ${it.message}", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-            }
-            .show()
-    }
-
-    private fun loadConfiguredPlaylist() {
-        val url = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
-        if (url.isBlank()) return
-        val urls = configuredUrls(url)
-        repository.load(urls) { result ->
-            runOnUiThread {
-                result.onSuccess {
-                    catalog = it
-                    greeting.text = "Olá, usuário  •  ${it.entries.size} itens"
-                    renderCategories()
-                    renderCatalog()
-                    selectFirstVisible()
-                    loadDerivedEpg(urls.firstOrNull())
-                }.onFailure {
-                    Toast.makeText(this, "Usando catálogo salvo: ${it.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun configuredUrls(raw: String): List<String> = raw.split(Regex("[\\n;]+" )).map { it.trim() }.filter { it.startsWith("http", true) }
 
     private fun loadDerivedEpg(m3uUrl: String?) {
         val epgUrl = m3uUrl?.takeIf { it.contains("get.php", true) }?.replace("get.php", "xmltv.php", ignoreCase = true) ?: return
@@ -843,7 +772,6 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        private const val PREF_PLAYLIST_URL = "playlist_url"
         private const val PREF_FAVORITES = "favorite_catalog_keys"
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"

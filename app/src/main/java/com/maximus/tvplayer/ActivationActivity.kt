@@ -25,7 +25,9 @@ class ActivationActivity : Activity() {
     private lateinit var connectButton: TextView
     private var checking = false
     private val integration = AppIntegrationRepository()
+    private val playlistRepository by lazy { PlaylistRepository(this) }
     private val handler = Handler(Looper.getMainLooper())
+    private var loadingPanelList = false
     private val periodicCheck = object : Runnable {
         override fun run() {
             verifyAccess(false)
@@ -69,7 +71,7 @@ class ActivationActivity : Activity() {
     }
 
     private fun verifyAccess(showProgress: Boolean) {
-        if (checking) return
+        if (checking || loadingPanelList) return
         checking = true
         if (showProgress) status.text = "Consultando o painel..."
         verifyButton.isEnabled = false
@@ -86,20 +88,36 @@ class ActivationActivity : Activity() {
                         return@onSuccess
                     }
                     if (config.playlistUrls.isEmpty()) {
-                        status.text = "MAC liberado, aguardando lista cadastrada..."
+                        status.text = "MAC liberado, aguardando a lista cadastrada no painel..."
                         status.setTextColor(getColor(R.color.warning))
                         return@onSuccess
                     }
-                    status.text = "Dispositivo liberado. Abrindo catálogo..."
-                    status.setTextColor(getColor(R.color.success))
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                        .putBoolean(PREF_ACCESS_ALLOWED, true)
-                        .apply()
-                    handler.removeCallbacks(periodicCheck)
-                    startActivity(Intent(this, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
-                    finish()
+                    loadingPanelList = true
+                    verifyButton.isEnabled = false
+                    connectButton.isEnabled = false
+                    status.text = "Lista do painel encontrada. Carregando canais, filmes e séries..."
+                    playlistRepository.loadRemoteOnly(config.playlistUrls) { playlistResult ->
+                        runOnUiThread {
+                            loadingPanelList = false
+                            playlistResult.onSuccess {
+                                status.text = "Conectado. Abrindo catálogo..."
+                                status.setTextColor(getColor(R.color.success))
+                                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                    .putBoolean(PREF_ACCESS_ALLOWED, true)
+                                    .apply()
+                                handler.removeCallbacks(periodicCheck)
+                                startActivity(Intent(this, MainActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                })
+                                finish()
+                            }.onFailure {
+                                verifyButton.isEnabled = true
+                                connectButton.isEnabled = true
+                                status.text = "A lista do painel não pôde ser carregada. Toque em CONECTAR para tentar novamente."
+                                status.setTextColor(getColor(R.color.warning))
+                            }
+                        }
+                    }
                 }.onFailure {
                     status.text = "Painel indisponível. Toque em VERIFICAR para tentar novamente."
                     status.setTextColor(getColor(R.color.warning))
@@ -121,6 +139,7 @@ class ActivationActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        playlistRepository.shutdown()
         integration.shutdown()
         super.onDestroy()
     }
