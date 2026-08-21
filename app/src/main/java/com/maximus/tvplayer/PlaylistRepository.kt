@@ -86,6 +86,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
+        if (metadata.getInt("format_version", 0) != 2) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -96,7 +97,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 2).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -233,8 +234,8 @@ class PlaylistRepository(private val context: Context) {
         val group = attributes["group-title"].orEmpty().ifBlank { "Sem categoria" }
         val kind = classify(displayName, group)
         val quality = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE).find(displayName)?.value?.uppercase().orEmpty()
-        val synopsis = firstAttribute(attributes, "description", "plot", "synopsis", "summary", "overview")
-        val cast = firstAttribute(attributes, "cast", "actors", "actor")
+        val synopsis = firstAttribute(attributes, "description", "tvg-desc", "tvg-description", "plot", "synopsis", "summary", "overview")
+        val cast = firstAttribute(attributes, "cast", "actors", "actor", "elenco", "tvg-cast")
         val year = firstAttribute(attributes, "year", "release-year", "release_year", "date")
         val backdrop = firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "background")
         val trailer = firstAttribute(attributes, "trailer", "trailer-url", "trailer_url", "youtube-trailer", "youtube_trailer")

@@ -175,10 +175,7 @@ class MainActivity : Activity() {
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
         searchHint.setOnClickListener { showSearchDialog() }
-        findViewById<View>(R.id.videoPreview).apply {
-            isFocusable = true
-            setOnClickListener { selectedEntry?.let(::openPreview) }
-        }
+        findViewById<View>(R.id.videoPreview).isFocusable = true
     }
 
     private fun setupCatalogList() {
@@ -186,7 +183,7 @@ class MainActivity : Activity() {
             imageLoader = imageLoader,
             fallbackLogo = ::fallbackLogo,
             onSelected = { selectEntry(it, false) },
-            onClicked = { openEntry(it) },
+            onClicked = { selectEntry(it, true) },
         )
         channelList.layoutManager = LinearLayoutManager(this)
         channelList.adapter = catalogAdapter
@@ -363,7 +360,7 @@ class MainActivity : Activity() {
     private fun renderActions(entry: CatalogEntry) {
         actionRow.removeAllViews()
         val isFavorite = entry.key in favorites()
-        val actions = listOf(if (entry.kind != MediaKind.LIVE && entry.trailerUrl.isNotBlank()) "▶  Trailer" else "▶  Assistir agora", if (isFavorite) "♥  Favorito" else "♡  Favoritar", "⌕  Buscar")
+        val actions = listOf(if (entry.kind != MediaKind.LIVE && entry.trailerUrl.isNotBlank()) "▶  REPRODUZIR TRAILER" else "▶  REPRODUZIR", if (isFavorite) "♥  Favorito" else "♡  Favoritar", "⌕  Buscar")
         actions.forEachIndexed { index, label ->
             val action = TextView(this).apply {
                 text = label
