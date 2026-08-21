@@ -22,6 +22,7 @@ class ActivationActivity : Activity() {
     private lateinit var mac: String
     private lateinit var status: TextView
     private lateinit var verifyButton: TextView
+    private var checking = false
     private val integration = AppIntegrationRepository()
     private val handler = Handler(Looper.getMainLooper())
     private val periodicCheck = object : Runnable {
@@ -44,10 +45,14 @@ class ActivationActivity : Activity() {
 
         mac = DeviceIdentifier.resolve(this)
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_MAC_ADDRESS, mac).apply()
-        findViewById<TextView>(R.id.macValue).text = mac
-        findViewById<TextView>(R.id.macFormatted).text = DeviceIdentifier.format(mac)
+        val macValue = findViewById<TextView>(R.id.macValue)
+        val macFormatted = findViewById<TextView>(R.id.macFormatted)
+        macValue.text = mac
+        macFormatted.text = "12 caracteres hexadecimais • toque para copiar"
         status = findViewById(R.id.activationStatus)
         verifyButton = findViewById(R.id.recheckButton)
+        macValue.setOnClickListener { copyMac() }
+        macFormatted.setOnClickListener { copyMac() }
         findViewById<TextView>(R.id.copyMacButton).setOnClickListener { copyMac() }
         verifyButton.setOnClickListener { verifyAccess(true) }
         verifyButton.requestFocus()
@@ -61,10 +66,13 @@ class ActivationActivity : Activity() {
     }
 
     private fun verifyAccess(showProgress: Boolean) {
+        if (checking) return
+        checking = true
         if (showProgress) status.text = "Consultando o painel..."
         verifyButton.isEnabled = false
         integration.fetchConfig(mac) { result ->
             runOnUiThread {
+                checking = false
                 verifyButton.isEnabled = true
                 result.onSuccess { config ->
                     if (!config.registered || !config.allowed) {
@@ -97,7 +105,7 @@ class ActivationActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        handler.postDelayed(periodicCheck, 30_000)
+        handler.postDelayed(periodicCheck, 5_000)
     }
 
     override fun onPause() {
@@ -122,8 +130,9 @@ object DeviceIdentifier {
     fun resolve(context: Context): String {
         val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID).orEmpty()
         val digest = MessageDigest.getInstance("SHA-256").digest(androidId.toByteArray(Charsets.UTF_8))
-        return digest.take(6).joinToString("") { String.format(Locale.US, "%02X", it.toInt() and 0xFF) }
+        val compact = digest.take(6).joinToString("") { String.format(Locale.US, "%02X", it.toInt() and 0xFF) }
+        return format(compact)
     }
 
-    fun format(compact: String): String = compact.chunked(2).joinToString(":")
+    fun format(compact: String): String = compact.replace(":", "").chunked(2).joinToString(":")
 }
