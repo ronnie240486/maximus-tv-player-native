@@ -71,9 +71,15 @@ class PlaylistRepository(private val context: Context) {
             setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
         }
         connection.connect()
-        if (connection.responseCode !in 200..299) error("Playlist HTTP ${connection.responseCode}")
-        val content = connection.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText)
+        val status = connection.responseCode
+        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+        val content = stream?.bufferedReader(Charsets.UTF_8)?.use(BufferedReader::readText).orEmpty()
         connection.disconnect()
+        if (status !in 200..299) error("A lista do painel recusou a conexão (HTTP $status)")
+        val trimmed = content.trimStart()
+        if (trimmed.startsWith("<html", true) || trimmed.startsWith("<!doctype", true)) {
+            error("A lista do painel devolveu uma página HTML/bloqueio, não uma M3U válida")
+        }
         return parseM3u(content)
     }
 

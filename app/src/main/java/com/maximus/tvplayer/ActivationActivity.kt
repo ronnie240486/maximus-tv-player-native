@@ -113,13 +113,18 @@ class ActivationActivity : Activity() {
                             }.onFailure {
                                 verifyButton.isEnabled = true
                                 connectButton.isEnabled = true
-                                status.text = "A lista do painel não pôde ser carregada. Toque em CONECTAR para tentar novamente."
+                                val reason = it.message.orEmpty()
+                                status.text = if (reason.contains("HTTP 403")) {
+                                    "MAC liberado, mas o servidor da lista recusou a conexão (HTTP 403). Verifique a lista no painel."
+                                } else {
+                                    "A lista do painel não pôde ser carregada. Toque em CONECTAR para tentar novamente."
+                                }
                                 status.setTextColor(getColor(R.color.warning))
                             }
                         }
                     }
                 }.onFailure {
-                    status.text = "Painel indisponível. Toque em VERIFICAR para tentar novamente."
+                    status.text = "Não foi possível consultar o painel. Toque em CONECTAR para tentar novamente."
                     status.setTextColor(getColor(R.color.warning))
                 }
             }
