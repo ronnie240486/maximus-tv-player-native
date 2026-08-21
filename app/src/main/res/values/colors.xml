@@ -7,7 +7,12 @@
     <color name="cyan">#4CE8F0</color>
     <color name="magenta">#F47B9C</color>
     <color name="white">#FFFFFF</color>
+    <color name="text_primary">#F4F6FF</color>
     <color name="text_secondary">#AAB1C7</color>
+    <color name="surface_light">#252C47</color>
+    <color name="button_text">#05060A</color>
+    <color name="warning">#F4B45F</color>
+    <color name="success">#63E6A5</color>
     <color name="text_muted">#6F7895</color>
     <color name="divider">#28304A</color>
     <color name="black">#05060A</color>

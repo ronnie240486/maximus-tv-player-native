@@ -135,7 +135,7 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             )
         setContentView(R.layout.activity_main)
-        sortAlphabetically = getPreferences(MODE_PRIVATE).getBoolean(PREF_SORT_ALPHA, false)
+        sortAlphabetically = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_SORT_ALPHA, false)
         bindViews()
         setupCatalogList()
         renderNavigation()
@@ -376,7 +376,7 @@ class MainActivity : Activity() {
         startActivity(Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_TITLE, entry.name)
             putExtra(PlayerActivity.EXTRA_URL, entry.streamUrl)
-            putExtra(PlayerActivity.EXTRA_MAC, getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
+            putExtra(PlayerActivity.EXTRA_MAC, getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
         })
     }
 
@@ -401,7 +401,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadRemoteConfiguration() {
-        val mac = getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
+        val mac = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
         if (mac.isBlank()) return
         appIntegration.fetchConfig(mac) { result ->
             runOnUiThread {
@@ -434,16 +434,16 @@ class MainActivity : Activity() {
         if (config.bannerUrl.isNotBlank()) remoteBannerUrl = config.bannerUrl
         if (config.epgUrl.isNotBlank()) remoteEpgUrl = config.epgUrl
         if (config.dnsUrl.isNotBlank() || config.serverApiUrl.isNotBlank() || config.testApiUrl.isNotBlank()) {
-            getPreferences(MODE_PRIVATE).edit()
+            getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit()
                 .putString(PREF_SERVER_API_URL, config.dnsUrl.ifBlank { config.serverApiUrl })
                 .putString(PREF_TEST_API_URL, config.testApiUrl)
                 .apply()
         }
         if (config.messageTitle.isNotBlank() || config.messageText.isNotBlank()) {
             val messageKey = "${config.messageTitle}|${config.messageText}"
-            val shownKey = getPreferences(MODE_PRIVATE).getString(PREF_LAST_MESSAGE_KEY, "")
+            val shownKey = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_LAST_MESSAGE_KEY, "")
             if (messageKey != shownKey) {
-                getPreferences(MODE_PRIVATE).edit().putString(PREF_LAST_MESSAGE_KEY, messageKey).apply()
+                getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_LAST_MESSAGE_KEY, messageKey).apply()
                 AlertDialog.Builder(this)
                     .setTitle(config.messageTitle.ifBlank { "Aviso" })
                     .setMessage(config.messageText)
@@ -453,7 +453,7 @@ class MainActivity : Activity() {
         }
         if (config.playlistUrls.isNotEmpty()) {
             val raw = config.playlistUrls.joinToString("\\n")
-            getPreferences(MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, raw).apply()
+            getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, raw).apply()
             repository.load(config.playlistUrls) { result ->
                 runOnUiThread {
                     result.onSuccess {
@@ -532,7 +532,7 @@ class MainActivity : Activity() {
             "update_dns" -> {
                 val dns = command.payload.optString("dns", command.payload.optString("url"))
                 if (dns.startsWith("http", true)) {
-                    getPreferences(MODE_PRIVATE).edit().putString(PREF_SERVER_API_URL, dns).apply()
+                    getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_SERVER_API_URL, dns).apply()
                     appIntegration.ackCommand(mac, command.id, "executed", "DNS aplicada")
                 } else {
                     appIntegration.ackCommand(mac, command.id, "failed", "DNS ausente")
@@ -555,7 +555,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSettingsDialog() {
-        val url = getPreferences(MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
+        val url = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
         val message = if (url.isBlank()) {
             "Nenhuma playlist configurada.\n\nO aplicativo aceita M3U Plus e usa cache local para acelerar a abertura."
         } else {
@@ -603,7 +603,7 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("Salvar") { _, _ ->
                 val groups = groupInput.text.toString().split(",", "\\n").map { it.trim() }.filter { it.isNotBlank() }.toSet()
-                getPreferences(MODE_PRIVATE).edit()
+                getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit()
                     .putStringSet(PREF_HIDDEN_GROUPS, groups)
                     .putBoolean(PREF_SORT_ALPHA, sortCheck.isChecked)
                     .apply()
@@ -616,8 +616,8 @@ class MainActivity : Activity() {
     }
 
     private fun showServerTestDialog() {
-        val mac = getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
-        val apiUrl = getPreferences(MODE_PRIVATE).getString(PREF_TEST_API_URL, "").orEmpty()
+        val mac = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
+        val apiUrl = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_TEST_API_URL, "").orEmpty()
         if (apiUrl.isBlank()) {
             Toast.makeText(this, "A API do Servidor ainda não foi configurada no painel", Toast.LENGTH_LONG).show()
             return
@@ -655,7 +655,7 @@ class MainActivity : Activity() {
             hint = "AA:BB:CC:DD:EE:FF"
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT
-            setText(getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, ""))
+            setText(getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, ""))
         }
         AlertDialog.Builder(this)
             .setTitle("Dispositivo / MAC")
@@ -663,7 +663,7 @@ class MainActivity : Activity() {
             .setView(input)
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("Salvar") { _, _ ->
-                getPreferences(MODE_PRIVATE).edit().putString(PREF_MAC_ADDRESS, input.text.toString().trim()).apply()
+                getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_MAC_ADDRESS, input.text.toString().trim()).apply()
                 Toast.makeText(this, "MAC salvo", Toast.LENGTH_SHORT).show()
                 loadRemoteConfiguration()
             }
@@ -675,7 +675,7 @@ class MainActivity : Activity() {
             hint = "https://servidor/playlist.m3u"
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            setText(getPreferences(MODE_PRIVATE).getString(PREF_PLAYLIST_URL, ""))
+            setText(getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_PLAYLIST_URL, ""))
         }
         AlertDialog.Builder(this)
             .setTitle("Playlist M3U Plus")
@@ -686,7 +686,7 @@ class MainActivity : Activity() {
                 val rawUrls = input.text.toString().trim()
                 val urls = configuredUrls(rawUrls)
                 if (urls.isEmpty()) return@setPositiveButton
-                getPreferences(MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, rawUrls).apply()
+                getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, rawUrls).apply()
                 Toast.makeText(this, "Carregando catálogo...", Toast.LENGTH_SHORT).show()
                 repository.load(urls) { result ->
                     runOnUiThread {
@@ -712,7 +712,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadConfiguredPlaylist() {
-        val url = getPreferences(MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
+        val url = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
         if (url.isBlank()) return
         val urls = configuredUrls(url)
         repository.load(urls) { result ->
@@ -765,18 +765,18 @@ class MainActivity : Activity() {
 
     private fun formatTime(timestamp: Long): String = if (timestamp <= 0L) "--:--" else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
 
-    private fun hiddenGroups(): Set<String> = getPreferences(MODE_PRIVATE).getStringSet(PREF_HIDDEN_GROUPS, emptySet())?.map { it.uppercase() }?.toSet() ?: emptySet()
+    private fun hiddenGroups(): Set<String> = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getStringSet(PREF_HIDDEN_GROUPS, emptySet())?.map { it.uppercase() }?.toSet() ?: emptySet()
 
     private fun isHidden(group: String): Boolean = group.uppercase() in hiddenGroups()
 
     private fun favorites(): MutableSet<String> {
-        return getPreferences(MODE_PRIVATE).getStringSet(PREF_FAVORITES, emptySet())?.toMutableSet() ?: mutableSetOf()
+        return getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getStringSet(PREF_FAVORITES, emptySet())?.toMutableSet() ?: mutableSetOf()
     }
 
     private fun toggleFavorite(entry: CatalogEntry) {
         val current = favorites()
         if (!current.add(entry.key)) current.remove(entry.key)
-        getPreferences(MODE_PRIVATE).edit().putStringSet(PREF_FAVORITES, current).apply()
+        getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putStringSet(PREF_FAVORITES, current).apply()
     }
 
     private fun editorialFor(entry: CatalogEntry): ChannelEditorial {
