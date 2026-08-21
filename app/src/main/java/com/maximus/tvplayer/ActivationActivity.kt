@@ -147,7 +147,7 @@ class ActivationActivity : Activity() {
                     verifyButton.isEnabled = false
                     connectButton.isEnabled = false
                     status.text = "Lista do painel encontrada. Carregando canais, filmes e séries..."
-                    playlistRepository.loadRemoteOnly(config.playlistUrls) { playlistResult ->
+                            playlistRepository.loadIfChanged(config.playlistUrls) { playlistResult ->
                         runOnUiThread {
                             loadingPanelList = false
                             playlistResult.onSuccess {

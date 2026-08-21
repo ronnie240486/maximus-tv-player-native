@@ -18,16 +18,14 @@ class PlaylistRepository(private val context: Context) {
     }
     private val executor = Executors.newSingleThreadExecutor()
     private val cacheFile = File(context.filesDir, "catalog-cache.tsv.gz")
+    private val metadata = context.getSharedPreferences("playlist_cache_metadata", Context.MODE_PRIVATE)
 
     fun load(url: String, callback: (Result<CatalogSnapshot>) -> Unit) = load(listOf(url), callback)
 
     fun load(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
             val result = runCatching {
-                val parsed = fetchUrls(urls)
-                if (parsed.isEmpty()) error("Nenhum item encontrado na playlist")
-                writeCache(parsed)
-                CatalogSnapshot(parsed)
+                downloadAndCache(urls)
             }.recoverCatching {
                 val cached = readCache()
                 if (cached.isEmpty()) throw it
@@ -39,11 +37,20 @@ class PlaylistRepository(private val context: Context) {
 
     fun loadRemoteOnly(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
+            callback(runCatching { downloadAndCache(urls) })
+        }
+    }
+
+    fun loadIfChanged(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) {
+        executor.execute {
             callback(runCatching {
-                val parsed = fetchUrls(urls)
-                if (parsed.isEmpty()) error("A lista do painel está vazia ou indisponível")
-                writeCache(parsed)
-                CatalogSnapshot(parsed)
+                val normalized = normalizeUrls(urls)
+                val cached = readCache()
+                if (cached.isNotEmpty() && !sourceChanged(normalized)) {
+                    CatalogSnapshot(cached, loadedFromCache = true)
+                } else {
+                    downloadAndCache(normalized)
+                }
             })
         }
     }
@@ -64,7 +71,52 @@ class PlaylistRepository(private val context: Context) {
 
     fun clearCache() {
         cacheFile.delete()
+        metadata.edit().clear().apply()
     }
+
+    private fun downloadAndCache(urls: List<String>): CatalogSnapshot {
+        val normalized = normalizeUrls(urls)
+        val parsed = fetchUrls(normalized)
+        if (parsed.isEmpty()) error("A lista do painel está vazia ou indisponível")
+        writeCache(parsed)
+        saveSourceMetadata(normalized)
+        return CatalogSnapshot(parsed)
+    }
+
+    private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+
+    private fun sourceChanged(urls: List<String>): Boolean {
+        val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
+        if (savedUrls != urls) return true
+        return urls.any { url ->
+            val savedSignature = metadata.getString("signature_${url.hashCode()}", "").orEmpty()
+            val remoteSignature = headSignature(url)
+            savedSignature.isNotBlank() && remoteSignature != null && remoteSignature != savedSignature
+        }
+    }
+
+    private fun saveSourceMetadata(urls: List<String>) {
+        val editor = metadata.edit().putString("urls", urls.joinToString("\n"))
+        urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
+        editor.apply()
+    }
+
+    private fun headSignature(urlString: String): String? = runCatching {
+        val connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
+            requestMethod = "HEAD"
+            connectTimeout = 5_000
+            readTimeout = 5_000
+            setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
+        }
+        val status = connection.responseCode
+        val signature = if (status in 200..299) {
+            listOf(connection.getHeaderField("ETag"), connection.getHeaderField("Last-Modified"), connection.getHeaderField("Content-Length"))
+                .joinToString("|")
+                .takeUnless { it == "||" }
+        } else null
+        connection.disconnect()
+        signature
+    }.getOrNull()
 
     fun shutdown() {
         executor.shutdownNow()

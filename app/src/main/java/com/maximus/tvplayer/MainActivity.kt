@@ -454,7 +454,7 @@ class MainActivity : Activity() {
                     if (cached != null && cached.entries.isNotEmpty()) {
                         applyCatalogSnapshot(cached, config)
                     } else {
-                        repository.loadRemoteOnly(config.playlistUrls) { result ->
+                        repository.loadIfChanged(config.playlistUrls) { result ->
                             runOnUiThread {
                                 result.onSuccess { loaded -> applyCatalogSnapshot(loaded, config) }
                                     .onFailure {
