@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private lateinit var greeting: TextView
     private lateinit var channelHeading: TextView
     private lateinit var videoPreviewText: TextView
+    private lateinit var previewLogo: ImageView
     private lateinit var heroImage: ImageView
     private lateinit var liveBadge: TextView
     private lateinit var detailEyebrow: TextView
@@ -179,6 +180,7 @@ class MainActivity : Activity() {
         greeting = findViewById(R.id.greeting)
         channelHeading = findViewById(R.id.channelHeading)
         videoPreviewText = findViewById(R.id.videoPreviewText)
+        previewLogo = findViewById(R.id.previewLogo)
         heroImage = findViewById(R.id.heroImage)
         liveBadge = findViewById(R.id.liveBadge)
         detailEyebrow = findViewById(R.id.detailEyebrow)
@@ -233,22 +235,23 @@ class MainActivity : Activity() {
     private fun renderNavigation() {
         navItems.removeAllViews()
         val items = listOf(
-            "INÍCIO" to "⌂",
-            "CANAIS" to "◉",
-            "FILMES" to "▣",
-            "SÉRIES" to "▤",
-            "FAVORITOS" to "★",
-            "AJUSTES" to "⚙",
+            Triple("INÍCIO", R.drawable.ic_nav_home, "Início"),
+            Triple("CANAIS", R.drawable.ic_nav_live, "Canais"),
+            Triple("FILMES", R.drawable.ic_nav_movies, "Filmes"),
+            Triple("SÉRIES", R.drawable.ic_nav_series, "Séries"),
+            Triple("FAVORITOS", R.drawable.ic_nav_favorites, "Favoritos"),
+            Triple("AJUSTES", R.drawable.ic_nav_settings, "Ajustes"),
         )
-        items.forEachIndexed { index, (label, glyph) ->
-            lateinit var icon: TextView
+        items.forEachIndexed { index, (label, iconRes, captionText) ->
+            lateinit var icon: ImageView
             lateinit var caption: TextView
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
-                layoutParams = LinearLayout.LayoutParams(-1, 92).apply { setMargins(4, 6, 4, 6) }
+                setPadding(0, 5, 0, 5)
+                layoutParams = LinearLayout.LayoutParams(-1, 106).apply { setMargins(4, 4, 4, 4) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -261,29 +264,30 @@ class MainActivity : Activity() {
                 }
                 setOnFocusChangeListener { view, hasFocus ->
                     val active = hasFocus || isNavigationSelected(label)
-                    view.background = rounded(if (active) 0x333FE7EF else 0x00111629, 10f)
-                    icon.setTextColor(if (active) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
+                    view.background = rounded(if (active) 0x333FE7EF else 0x00111629, 12f)
+                    icon.alpha = if (active) 1f else 0.72f
                     caption.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
                 }
             }
-            icon = TextView(this).apply {
-                text = glyph
-                gravity = Gravity.CENTER
-                textSize = 26f
-                setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
-                background = rounded(0x441B2036, 24f)
-                layoutParams = LinearLayout.LayoutParams(58, 54).apply { setMargins(0, 0, 0, 4) }
+            icon = ImageView(this).apply {
+                setImageResource(iconRes)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                alpha = if (isNavigationSelected(label) || index == 1) 1f else 0.72f
+                background = rounded(0x441B2036, 28f)
+                layoutParams = LinearLayout.LayoutParams(64, 64).apply { setMargins(0, 0, 0, 5) }
+                setPadding(14, 14, 14, 14)
             }
             caption = TextView(this).apply {
-                text = label
+                text = captionText
                 gravity = Gravity.CENTER
+                includeFontPadding = false
                 textSize = 10f
                 setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 24)
+                layoutParams = LinearLayout.LayoutParams(-1, 22)
             }
             row.addView(icon)
             row.addView(caption)
-            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 10f)
+            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 12f)
             navItems.addView(row)
         }
     }
@@ -491,11 +495,18 @@ class MainActivity : Activity() {
             hasTrailer -> "▶  Trailer • ${entry.name}"
             else -> "Poster • ${entry.name}"
         }
-        val heroSource = if (isLive && entry.backdropUrl.isBlank()) "" else entry.backdropUrl.ifBlank { entry.logoUrl }
+        val heroSource = entry.backdropUrl.ifBlank { if (isLive) "" else entry.logoUrl }
+        heroImage.setImageResource(fallbackHero(entry))
         if (heroSource.isBlank()) {
             heroImage.setImageResource(fallbackHero(entry))
         } else {
             imageLoader.load(heroSource, heroImage, fallbackHero(entry))
+        }
+        previewLogo.visibility = if (entry.logoUrl.isNotBlank() || isLive) View.VISIBLE else View.GONE
+        if (entry.logoUrl.isNotBlank()) {
+            imageLoader.load(entry.logoUrl, previewLogo, fallbackLogo(entry))
+        } else {
+            previewLogo.setImageResource(fallbackLogo(entry))
         }
         liveBadge.visibility = if (isLive || hasTrailer) View.VISIBLE else View.GONE
         liveBadge.text = if (isLive) "AO VIVO" else "TRAILER"
@@ -996,7 +1007,7 @@ class MainActivity : Activity() {
         entry.name.contains("Discovery", true) -> R.drawable.discovery_hero
         entry.name.contains("National Geographic", true) -> R.drawable.national_geo_hero
         entry.name.contains("ESPN", true) -> R.drawable.espn_hero
-        else -> R.drawable.tv_banner
+        else -> R.drawable.excellence_home_hero
     }
 
     private fun searchPlaceholder(): String = when {
