@@ -22,6 +22,7 @@ import androidx.recyclerview.widget.RecyclerView
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import org.json.JSONObject
 
 private data class ChannelEditorial(
     val eyebrow: String,
@@ -37,6 +38,10 @@ class MainActivity : Activity() {
     private lateinit var channelList: RecyclerView
     private lateinit var categoryList: LinearLayout
     private lateinit var navItems: LinearLayout
+    private lateinit var appLogo: ImageView
+    private lateinit var remoteBackground: ImageView
+    private lateinit var brandMark: TextView
+    private lateinit var brandSubtitle: TextView
     private lateinit var searchHint: TextView
     private lateinit var greeting: TextView
     private lateinit var channelHeading: TextView
@@ -54,6 +59,7 @@ class MainActivity : Activity() {
     private lateinit var actionRow: LinearLayout
 
     private val repository by lazy { PlaylistRepository(this) }
+    private val appIntegration = AppIntegrationRepository()
     private val imageLoader = ImageLoader()
     private val epgRepository = EpgRepository()
     private var epgByChannel: Map<String, List<EpgProgram>> = emptyMap()
@@ -65,6 +71,7 @@ class MainActivity : Activity() {
     private var favoritesOnly = false
     private var currentKind = MediaKind.LIVE
     private var sortAlphabetically = false
+    private var remoteBannerUrl = ""
 
     private val editorials = mapOf(
         "animal planet" to ChannelEditorial(
@@ -136,9 +143,14 @@ class MainActivity : Activity() {
         selectedEntry = catalog.entries.firstOrNull()
         selectedEntry?.let { selectEntry(it, false) }
         loadConfiguredPlaylist()
+        loadRemoteConfiguration()
     }
 
     private fun bindViews() {
+        appLogo = findViewById(R.id.appLogo)
+        remoteBackground = findViewById(R.id.remoteBackground)
+        brandMark = findViewById(R.id.brandMark)
+        brandSubtitle = findViewById(R.id.brandSubtitle)
         channelList = findViewById(R.id.channelList)
         categoryList = findViewById(R.id.categoryList)
         navItems = findViewById(R.id.navItems)
@@ -300,7 +312,11 @@ class MainActivity : Activity() {
         val editorial = editorialFor(entry)
         val epgProgram = currentEpgProgram(entry)
         videoPreviewText.text = "Preview • ${entry.name}"
-        heroImage.setImageResource(fallbackHero(entry))
+        if (remoteBannerUrl.isBlank()) {
+            heroImage.setImageResource(fallbackHero(entry))
+        } else {
+            imageLoader.load(remoteBannerUrl, heroImage, fallbackHero(entry))
+        }
         liveBadge.visibility = if (entry.kind == MediaKind.LIVE) View.VISIBLE else View.GONE
         detailEyebrow.text = editorial.eyebrow.uppercase()
         detailChannelName.text = entry.name
@@ -382,6 +398,144 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun loadRemoteConfiguration() {
+        val mac = getPreferences(MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
+        if (mac.isBlank()) return
+        appIntegration.fetchConfig(mac) { result ->
+            runOnUiThread {
+                result.onSuccess { config ->
+                    if (!config.registered || !config.allowed) {
+                        showAccessUnavailable(config)
+                        return@onSuccess
+                    }
+                    applyRemoteConfig(config)
+                    appIntegration.startBackgroundSync(
+                        mac = mac,
+                        currentContent = { selectedEntry?.name },
+                        onNotifications = { notifications -> showRemoteNotifications(mac, notifications) },
+                        onCommands = { commands -> showRemoteCommands(mac, commands) },
+                    )
+                }.onFailure {
+                    Toast.makeText(this, "Configuração remota indisponível; mantendo a última lista válida", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun applyRemoteConfig(config: RemoteAppConfig) {
+        if (config.appName.isNotBlank()) {
+            brandMark.text = config.appName.uppercase()
+            brandSubtitle.text = "TV PLAYER"
+        }
+        if (config.logoUrl.isNotBlank()) imageLoader.load(config.logoUrl, appLogo, R.drawable.tv_banner)
+        if (config.backgroundUrl.isNotBlank()) imageLoader.load(config.backgroundUrl, remoteBackground, R.drawable.tv_banner)
+        if (config.bannerUrl.isNotBlank()) remoteBannerUrl = config.bannerUrl
+        if (config.messageTitle.isNotBlank() || config.messageText.isNotBlank()) {
+            val messageKey = "${config.messageTitle}|${config.messageText}"
+            val shownKey = getPreferences(MODE_PRIVATE).getString(PREF_LAST_MESSAGE_KEY, "")
+            if (messageKey != shownKey) {
+                getPreferences(MODE_PRIVATE).edit().putString(PREF_LAST_MESSAGE_KEY, messageKey).apply()
+                AlertDialog.Builder(this)
+                    .setTitle(config.messageTitle.ifBlank { "Aviso" })
+                    .setMessage(config.messageText)
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
+        if (config.playlistUrls.isNotEmpty()) {
+            val raw = config.playlistUrls.joinToString("\\n")
+            getPreferences(MODE_PRIVATE).edit().putString(PREF_PLAYLIST_URL, raw).apply()
+            repository.load(config.playlistUrls) { result ->
+                runOnUiThread {
+                    result.onSuccess {
+                        catalog = it
+                        greeting.text = "Olá, usuário  •  ${it.entries.size} itens"
+                        currentKind = MediaKind.LIVE
+                        favoritesOnly = false
+                        selectedCategory = "Todos"
+                        renderNavigation()
+                        renderCategories()
+                        renderCatalog()
+                        selectFirstVisible()
+                        loadDerivedEpg(config.playlistUrls.firstOrNull())
+                    }.onFailure {
+                        Toast.makeText(this, "Lista remota indisponível; mantendo a última lista válida", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+        if (config.apkVersion.isNotBlank() && config.apkDownloadUrl.isNotBlank() && config.apkVersion != packageManager.getPackageInfo(packageName, 0).versionName) {
+            Toast.makeText(this, "Há uma atualização disponível: ${config.apkVersion}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showAccessUnavailable(config: RemoteAppConfig) {
+        AlertDialog.Builder(this)
+            .setTitle("Acesso indisponível")
+            .setMessage("Este dispositivo não está autorizado para ${config.appName.ifBlank { "este aplicativo" }}. Verifique o MAC e o cadastro no painel.")
+            .setPositiveButton("Configurar MAC") { _, _ -> showMacDialog() }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun showRemoteNotifications(mac: String, notifications: List<RemoteNotification>) {
+        notifications.forEach { notification ->
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle(notification.title.ifBlank { "Aviso" })
+                    .setMessage(notification.message)
+                    .setPositiveButton("OK") { _, _ -> appIntegration.ackNotification(mac, notification.id) }
+                    .show()
+            }
+        }
+    }
+
+    private fun showRemoteCommands(mac: String, commands: List<RemoteCommand>) {
+        commands.forEach { command ->
+            runOnUiThread { executeRemoteCommand(mac, command) }
+        }
+    }
+
+    private fun executeRemoteCommand(mac: String, command: RemoteCommand) {
+        when (command.command.lowercase()) {
+            "refresh_playlist" -> {
+                loadConfiguredPlaylist()
+                appIntegration.ackCommand(mac, command.id, "executed", "Playlist atualizada")
+            }
+            "switch_playlist" -> {
+                val url = command.payload.optString("url")
+                if (url.startsWith("http", true)) {
+                    repository.load(listOf(url)) { result ->
+                        result.onSuccess { loaded ->
+                            runOnUiThread {
+                                catalog = loaded
+                                renderCategories()
+                                renderCatalog()
+                                selectFirstVisible()
+                            }
+                            appIntegration.ackCommand(mac, command.id, "executed", "Playlist alternada")
+                        }.onFailure { appIntegration.ackCommand(mac, command.id, "failed", it.message.orEmpty()) }
+                    }
+                } else {
+                    appIntegration.ackCommand(mac, command.id, "failed", "URL de playlist ausente")
+                }
+            }
+            "show_message" -> {
+                AlertDialog.Builder(this)
+                    .setTitle(command.payload.optString("title", "Aviso"))
+                    .setMessage(command.payload.optString("message"))
+                    .setPositiveButton("OK") { _, _ -> appIntegration.ackCommand(mac, command.id, "executed", "Mensagem exibida") }
+                    .show()
+            }
+            "sync_access" -> {
+                appIntegration.ackCommand(mac, command.id, "executed", "Acesso sincronizado")
+                loadRemoteConfiguration()
+            }
+            "restart_player" -> appIntegration.ackCommand(mac, command.id, "executed", "Sessão pronta para reiniciar")
+            else -> appIntegration.ackCommand(mac, command.id, "failed", "Comando não suportado")
+        }
+    }
+
     private fun showSettingsDialog() {
         val url = getPreferences(MODE_PRIVATE).getString(PREF_PLAYLIST_URL, "").orEmpty()
         val message = if (url.isBlank()) {
@@ -457,6 +611,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Salvar") { _, _ ->
                 getPreferences(MODE_PRIVATE).edit().putString(PREF_MAC_ADDRESS, input.text.toString().trim()).apply()
                 Toast.makeText(this, "MAC salvo", Toast.LENGTH_SHORT).show()
+                loadRemoteConfiguration()
             }
             .show()
     }
@@ -625,6 +780,7 @@ class MainActivity : Activity() {
         repository.shutdown()
         imageLoader.shutdown()
         epgRepository.shutdown()
+        appIntegration.shutdown()
         super.onDestroy()
     }
 
@@ -634,5 +790,6 @@ class MainActivity : Activity() {
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"
         private const val PREF_MAC_ADDRESS = "mac_address"
+        private const val PREF_LAST_MESSAGE_KEY = "last_remote_message_key"
     }
 }
