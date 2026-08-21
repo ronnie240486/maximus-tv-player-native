@@ -449,28 +449,53 @@ class MainActivity : Activity() {
             }
         }
         if (config.playlistUrls.isNotEmpty()) {
-            repository.load(config.playlistUrls) { result ->
+            repository.loadCached { cached ->
                 runOnUiThread {
-                    result.onSuccess {
-                        catalog = it
-                        greeting.text = "Olá, usuário  •  ${it.entries.size} itens"
-                        currentKind = MediaKind.LIVE
-                        favoritesOnly = false
-                        selectedCategory = "Todos"
-                        renderNavigation()
-                        renderCategories()
-                        renderCatalog()
-                        selectFirstVisible()
-                        loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
-                    }.onFailure {
-                        Toast.makeText(this, "Lista remota indisponível; mantendo a última lista válida", Toast.LENGTH_LONG).show()
+                    if (cached != null && cached.entries.isNotEmpty()) {
+                        applyCatalogSnapshot(cached, config)
+                    } else {
+                        repository.loadRemoteOnly(config.playlistUrls) { result ->
+                            runOnUiThread {
+                                result.onSuccess { loaded -> applyCatalogSnapshot(loaded, config) }
+                                    .onFailure {
+                                        showCatalogUnavailable("A lista do painel não está disponível nesta TV Box.")
+                                    }
+                            }
+                        }
                     }
                 }
             }
+        } else {
+            showCatalogUnavailable("O painel liberou o MAC, mas não enviou nenhuma lista.")
         }
         if (config.apkVersion.isNotBlank() && config.apkDownloadUrl.isNotBlank() && config.apkVersion != packageManager.getPackageInfo(packageName, 0).versionName) {
             Toast.makeText(this, "Há uma atualização disponível: ${config.apkVersion}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun applyCatalogSnapshot(snapshot: CatalogSnapshot, config: RemoteAppConfig) {
+        if (snapshot.entries.isEmpty()) {
+            showCatalogUnavailable("A lista do painel foi recebida vazia.")
+            return
+        }
+        catalog = snapshot
+        greeting.text = "Olá, usuário  •  ${snapshot.entries.size} itens"
+        currentKind = MediaKind.LIVE
+        favoritesOnly = false
+        selectedCategory = "Todos"
+        renderNavigation()
+        renderCategories()
+        renderCatalog()
+        selectFirstVisible()
+        loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
+    }
+
+    private fun showCatalogUnavailable(message: String) {
+        catalog = CatalogSnapshot(emptyList())
+        selectedEntry = null
+        renderCategories()
+        renderCatalog()
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     private fun showAccessUnavailable(config: RemoteAppConfig) {
