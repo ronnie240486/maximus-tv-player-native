@@ -61,6 +61,8 @@ class MainActivity : Activity() {
     private lateinit var programTime: TextView
     private lateinit var nextProgram: TextView
     private lateinit var actionRow: LinearLayout
+    private lateinit var vodCards: LinearLayout
+    private lateinit var vodTitle: TextView
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
@@ -180,6 +182,8 @@ class MainActivity : Activity() {
         programTime = findViewById(R.id.programTime)
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
+        vodCards = findViewById(R.id.vodCards)
+        vodTitle = findViewById(R.id.vodTitle)
         searchHint.setOnClickListener { showSearchDialog() }
         findViewById<View>(R.id.videoPreview).isFocusable = true
     }
@@ -204,16 +208,23 @@ class MainActivity : Activity() {
 
     private fun renderNavigation() {
         navItems.removeAllViews()
-        val items = listOf("INÍCIO", "CANAIS", "FILMES", "SÉRIES", "FAVORITOS", "AJUSTES")
-        items.forEachIndexed { index, label ->
-            val item = TextView(this).apply {
-                text = label
+        val items = listOf(
+            "INÍCIO" to "⌂",
+            "CANAIS" to "◉",
+            "FILMES" to "▣",
+            "SÉRIES" to "▤",
+            "FAVORITOS" to "★",
+            "AJUSTES" to "⚙",
+        )
+        items.forEachIndexed { index, (label, glyph) ->
+            lateinit var icon: TextView
+            lateinit var caption: TextView
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                textSize = 10f
                 isFocusable = true
                 isClickable = true
-                setPadding(4, 12, 4, 12)
-                layoutParams = LinearLayout.LayoutParams(-1, 58).apply { setMargins(8, 2, 8, 2) }
+                layoutParams = LinearLayout.LayoutParams(-1, 64).apply { setMargins(4, 2, 4, 2) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO", "CANAIS" -> switchSection(MediaKind.LIVE)
@@ -224,13 +235,31 @@ class MainActivity : Activity() {
                     }
                 }
                 setOnFocusChangeListener { view, hasFocus ->
-                    view.background = rounded(if (hasFocus || isNavigationSelected(label)) 0x333FE7EF else 0x00111629, 10f)
-                    (view as TextView).setTextColor(if (hasFocus || isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                    val active = hasFocus || isNavigationSelected(label)
+                    view.background = rounded(if (active) 0x333FE7EF else 0x00111629, 10f)
+                    icon.setTextColor(if (active) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
+                    caption.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
                 }
             }
-            item.setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-            item.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 10f)
-            navItems.addView(item)
+            icon = TextView(this).apply {
+                text = glyph
+                gravity = Gravity.CENTER
+                textSize = 20f
+                setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(248, 208, 112) else Color.rgb(170, 177, 199))
+                background = rounded(0x441B2036, 24f)
+                layoutParams = LinearLayout.LayoutParams(42, 38)
+            }
+            caption = TextView(this).apply {
+                text = label
+                gravity = Gravity.CENTER
+                textSize = 8f
+                setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                layoutParams = LinearLayout.LayoutParams(-1, 20)
+            }
+            row.addView(icon)
+            row.addView(caption)
+            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 10f)
+            navItems.addView(row)
         }
     }
 
@@ -609,6 +638,33 @@ class MainActivity : Activity() {
         renderCatalog()
         selectFirstVisible()
         loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
+        renderVodStrip()
+    }
+
+    private fun renderVodStrip() {
+        vodCards.removeAllViews()
+        if (!databaseBackedCatalog) return
+        repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortAlphabetically, 4, 0) { movies ->
+            runOnUiThread {
+                movies.forEach { movie ->
+                    val card = TextView(this).apply {
+                        text = movie.name
+                        gravity = Gravity.CENTER_VERTICAL
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        textSize = 10f
+                        setTextColor(Color.WHITE)
+                        setPadding(12, 6, 12, 6)
+                        background = rounded(0x661B2036, 10f)
+                        isFocusable = true
+                        isClickable = true
+                        layoutParams = LinearLayout.LayoutParams(150, 52).apply { setMargins(0, 0, 8, 0) }
+                        setOnClickListener { selectEntry(movie, true) }
+                    }
+                    vodCards.addView(card)
+                }
+            }
+        }
     }
 
     private fun showCatalogUnavailable(message: String) {
