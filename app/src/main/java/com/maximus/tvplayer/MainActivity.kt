@@ -8,12 +8,15 @@ import android.view.Gravity
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 
 private data class TvChannel(
     val name: String,
+    val logoRes: Int,
+    val heroRes: Int,
     val category: String,
     val eyebrow: String,
     val description: String,
@@ -29,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var categoryList: LinearLayout
     private lateinit var navItems: LinearLayout
     private lateinit var videoPreviewText: TextView
+    private lateinit var heroImage: ImageView
     private lateinit var liveBadge: TextView
     private lateinit var detailEyebrow: TextView
     private lateinit var detailChannelName: TextView
@@ -43,6 +47,8 @@ class MainActivity : Activity() {
     private val channels = listOf(
         TvChannel(
             name = "Animal Planet",
+            logoRes = R.drawable.animal_planet_logo,
+            heroRes = R.drawable.animal_planet_hero,
             category = "Documentários",
             eyebrow = "Natureza e vida selvagem",
             description = "Documentários, expedições e histórias sobre animais, seus habitats e a relação entre as pessoas e o mundo natural.",
@@ -54,6 +60,8 @@ class MainActivity : Activity() {
         ),
         TvChannel(
             name = "Discovery Channel",
+            logoRes = R.drawable.discovery_logo,
+            heroRes = R.drawable.discovery_hero,
             category = "Documentários",
             eyebrow = "Ciência, aventura e descoberta",
             description = "Séries e documentários que exploram ciência, tecnologia, engenharia, aventura e os mistérios do mundo.",
@@ -65,6 +73,8 @@ class MainActivity : Activity() {
         ),
         TvChannel(
             name = "National Geographic",
+            logoRes = R.drawable.national_geo_logo,
+            heroRes = R.drawable.national_geo_hero,
             category = "Documentários",
             eyebrow = "Conhecimento e exploração",
             description = "Produções sobre ciência, história, cultura, viagens e vida selvagem com imagens de diferentes lugares do planeta.",
@@ -76,6 +86,8 @@ class MainActivity : Activity() {
         ),
         TvChannel(
             name = "ESPN Brasil",
+            logoRes = R.drawable.espn_logo,
+            heroRes = R.drawable.espn_hero,
             category = "Esportes",
             eyebrow = "Esportes e competição",
             description = "Eventos esportivos ao vivo, programas de debate, notícias e análises para acompanhar os principais campeonatos.",
@@ -87,6 +99,8 @@ class MainActivity : Activity() {
         ),
         TvChannel(
             name = "Cartoon Network",
+            logoRes = R.drawable.cartoon_network_logo,
+            heroRes = R.drawable.cartoon_network_hero,
             category = "Infantil",
             eyebrow = "Desenhos e diversão",
             description = "Animações, aventuras e personagens para a família acompanhar ao longo do dia.",
@@ -127,6 +141,7 @@ class MainActivity : Activity() {
         categoryList = findViewById(R.id.categoryList)
         navItems = findViewById(R.id.navItems)
         videoPreviewText = findViewById(R.id.videoPreviewText)
+        heroImage = findViewById(R.id.heroImage)
         liveBadge = findViewById(R.id.liveBadge)
         detailEyebrow = findViewById(R.id.detailEyebrow)
         detailChannelName = findViewById(R.id.detailChannelName)
@@ -231,6 +246,12 @@ class MainActivity : Activity() {
                 setPadding(5, 3, 5, 3)
                 background = rounded(0x33F47B9C, 4f)
             }
+            val logo = ImageView(this).apply {
+                setImageResource(channel.logoRes)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                layoutParams = LinearLayout.LayoutParams(42, 42).apply { setMargins(0, 0, 8, 0) }
+            }
+            row.addView(logo)
             row.addView(number)
             row.addView(channelName)
             row.addView(live)
@@ -241,6 +262,7 @@ class MainActivity : Activity() {
     private fun selectChannel(channel: TvChannel, requestFocus: Boolean) {
         selectedChannel = channel
         videoPreviewText.text = "Preview • ${channel.name}"
+        heroImage.setImageResource(channel.heroRes)
         liveBadge.visibility = View.VISIBLE
         detailEyebrow.text = channel.eyebrow.uppercase()
         detailChannelName.text = channel.name

@@ -151,8 +151,21 @@
                 <FrameLayout
                     android:id="@+id/videoPreview"
                     android:layout_width="match_parent"
-                    android:layout_height="210dp"
+                    android:layout_height="250dp"
                     android:background="@drawable/tv_banner">
+
+                    <ImageView
+                        android:id="@+id/heroImage"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:alpha="0.86"
+                        android:contentDescription="@null"
+                        android:scaleType="centerCrop" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="#55080B16" />
 
                     <TextView
                         android:id="@+id/videoPreviewText"
