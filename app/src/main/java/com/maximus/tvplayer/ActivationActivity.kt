@@ -22,13 +22,14 @@ class ActivationActivity : Activity() {
     private lateinit var mac: String
     private lateinit var status: TextView
     private lateinit var verifyButton: TextView
+    private lateinit var connectButton: TextView
     private var checking = false
     private val integration = AppIntegrationRepository()
     private val handler = Handler(Looper.getMainLooper())
     private val periodicCheck = object : Runnable {
         override fun run() {
             verifyAccess(false)
-            handler.postDelayed(this, 30_000)
+            handler.postDelayed(this, 5_000)
         }
     }
 
@@ -51,11 +52,13 @@ class ActivationActivity : Activity() {
         macFormatted.text = "12 caracteres hexadecimais • toque para copiar"
         status = findViewById(R.id.activationStatus)
         verifyButton = findViewById(R.id.recheckButton)
+        connectButton = findViewById(R.id.connectButton)
         macValue.setOnClickListener { copyMac() }
         macFormatted.setOnClickListener { copyMac() }
         findViewById<TextView>(R.id.copyMacButton).setOnClickListener { copyMac() }
+        connectButton.setOnClickListener { verifyAccess(true) }
         verifyButton.setOnClickListener { verifyAccess(true) }
-        verifyButton.requestFocus()
+        connectButton.requestFocus()
         verifyAccess(false)
     }
 
@@ -70,10 +73,12 @@ class ActivationActivity : Activity() {
         checking = true
         if (showProgress) status.text = "Consultando o painel..."
         verifyButton.isEnabled = false
+        connectButton.isEnabled = false
         integration.fetchConfig(mac) { result ->
             runOnUiThread {
                 checking = false
                 verifyButton.isEnabled = true
+                connectButton.isEnabled = true
                 result.onSuccess { config ->
                     if (!config.registered || !config.allowed) {
                         status.text = "Aguardando cadastro e liberação no painel..."
@@ -105,6 +110,7 @@ class ActivationActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        handler.removeCallbacks(periodicCheck)
         handler.postDelayed(periodicCheck, 5_000)
     }
 

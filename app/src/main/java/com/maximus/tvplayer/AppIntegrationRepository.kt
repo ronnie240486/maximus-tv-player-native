@@ -53,6 +53,21 @@ class AppIntegrationRepository {
 
     fun fetchConfig(mac: String, callback: (Result<RemoteAppConfig>) -> Unit) {
         getAsync("/api/v5/check_mac.php?mac=${encode(mac)}") { result ->
+            result.onSuccess { json ->
+                val config = parseMaximusConfig(json, mac)
+                if (config.registered || config.playlistUrls.isNotEmpty()) {
+                    callback(Result.success(config))
+                } else {
+                    fetchDeviceConfig(mac, callback)
+                }
+            }.onFailure {
+                fetchDeviceConfig(mac, callback)
+            }
+        }
+    }
+
+    private fun fetchDeviceConfig(mac: String, callback: (Result<RemoteAppConfig>) -> Unit) {
+        getAsync("/api/device/check?mac=${encode(mac)}") { result ->
             callback(result.map { parseMaximusConfig(it, mac) })
         }
     }
@@ -234,14 +249,19 @@ class AppIntegrationRepository {
     }
 
     private fun parseMaximusConfig(json: JSONObject, fallbackMac: String): RemoteAppConfig {
-        val root = json.optJSONObject("data") ?: json
-        val found = root.optBoolean("found", root.optBoolean("registered", true))
-        val allowed = root.optBoolean("allowed", false)
+        val root = payloadRoot(json)
+        val found = if (root.has("found")) root.optBoolean("found") else if (root.has("registered")) root.optBoolean("registered") else root.has("mac") || root.has("urlM3u8") || root.has("playlist_url")
+        val allowed = if (root.has("allowed")) root.optBoolean("allowed") else root.optString("status").lowercase() in setOf("active", "online", "liberado", "allowed", "liberated")
         val status = root.optString("status", "")
         val blockedStatus = status.lowercase() in setOf("blocked", "bloqueado", "expired", "expirado", "denied", "negado")
-        val playlist = root.optString("urlM3u8", root.optString("playlist_url", ""))
-        val epg = root.optString("urlEpg", root.optString("epg_url", ""))
-        val playlistUrls = if (playlist.startsWith("http", true)) listOf(playlist) else parsePlaylistArray(root.optJSONArray("playlist_urls"))
+        val playlist = firstString(root, "urlM3u8", "playlist_url", "playlistUrl", "m3u_url", "url")
+        val epg = firstString(root, "urlEpg", "urlEpg", "epg_url", "url_epg")
+        val playlistUrls = when {
+            playlist.startsWith("http", true) -> listOf(playlist)
+            root.optJSONArray("playlist_urls") != null -> parsePlaylistArray(root.optJSONArray("playlist_urls"))
+            root.optJSONArray("playlists") != null -> parsePlaylistArray(root.optJSONArray("playlists"))
+            else -> emptyList()
+        }
         return RemoteAppConfig(
             registered = found,
             allowed = found && allowed && !blockedStatus,
@@ -299,10 +319,28 @@ class AppIntegrationRepository {
         )
     }
 
+    private fun payloadRoot(json: JSONObject): JSONObject {
+        val data = json.opt("data")
+        return when (data) {
+            is JSONObject -> data
+            is JSONArray -> data.optJSONObject(0) ?: json
+            else -> json
+        }
+    }
+
+    private fun firstString(root: JSONObject, vararg keys: String): String {
+        for (key in keys) {
+            val value = root.optString(key, "").trim()
+            if (value.startsWith("http", true)) return value
+        }
+        return ""
+    }
+
     private fun parsePlaylistArray(array: JSONArray?): List<String> = buildList {
         if (array == null) return@buildList
         for (index in 0 until array.length()) {
-            val value = array.optString(index).trim()
+            val item = array.opt(index)
+            val value = if (item is JSONObject) firstString(item, "url", "playlist_url", "playlistUrl", "urlM3u8") else item.toString().trim()
             if (value.startsWith("http", true)) add(value)
         }
     }

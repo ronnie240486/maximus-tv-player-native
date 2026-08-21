@@ -3,7 +3,12 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background"
-    android:padding="48dp">
+    android:clipChildren="false"
+    android:clipToPadding="false"
+    android:paddingStart="28dp"
+    android:paddingTop="20dp"
+    android:paddingEnd="28dp"
+    android:paddingBottom="20dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -13,17 +18,18 @@
 
         <ImageView
             android:id="@+id/activationLogo"
-            android:layout_width="86dp"
-            android:layout_height="86dp"
-            android:contentDescription="@null"
-            android:scaleType="centerInside"
-            android:src="@drawable/excellence_logo" />
+            android:layout_width="132dp"
+            android:layout_height="132dp"
+            android:adjustViewBounds="true"
+            android:contentDescription="Logo Excellence"
+            android:scaleType="fitCenter"
+            android:src="@drawable/excellence_logo_safe" />
 
         <TextView
             android:id="@+id/activationBrand"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="4dp"
             android:letterSpacing="0.16"
             android:text="EXCELLENCE"
             android:textColor="@color/cyan"
@@ -33,7 +39,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
+            android:layout_marginTop="22dp"
             android:text="ATIVE SEU DISPOSITIVO"
             android:textColor="@color/text_primary"
             android:textSize="20sp"
@@ -42,7 +48,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:gravity="center"
             android:text="Cadastre este MAC no painel para liberar canais, filmes e séries."
             android:textColor="@color/text_secondary"
@@ -52,7 +58,7 @@
             android:id="@+id/macLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
+            android:layout_marginTop="20dp"
             android:text="MAC DO DISPOSITIVO"
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
@@ -61,59 +67,78 @@
             android:id="@+id/macValue"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="5dp"
             android:fontFamily="monospace"
-            android:letterSpacing="0.12"
-            android:text="A1B2C3D4E5F6"
+            android:letterSpacing="0.08"
+            android:text="AA:BB:CC:DD:EE:FF"
             android:textColor="@color/text_primary"
             android:textSize="27sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Toque para copiar o MAC" />
 
         <TextView
             android:id="@+id/macFormatted"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
-            android:fontFamily="monospace"
-            android:text="A1:B2:C3:D4:E5:F6"
+            android:layout_marginTop="4dp"
+            android:fontFamily="sans"
+            android:text="Toque no MAC para copiar"
             android:textColor="@color/cyan"
-            android:textSize="15sp" />
+            android:textSize="13sp" />
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="20dp"
             android:gravity="center"
             android:orientation="horizontal">
 
             <TextView
                 android:id="@+id/copyMacButton"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:background="@drawable/activation_button_primary"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:minWidth="190dp"
-                android:paddingStart="18dp"
-                android:paddingEnd="18dp"
-                android:text="COPIAR MAC"
-                android:textColor="@color/button_text"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/recheckButton"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:layout_marginStart="12dp"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
                 android:background="@drawable/activation_button_secondary"
                 android:clickable="true"
                 android:focusable="true"
                 android:gravity="center"
-                android:minWidth="150dp"
-                android:paddingStart="18dp"
-                android:paddingEnd="18dp"
+                android:maxWidth="250dp"
+                android:text="COPIAR MAC"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/connectButton"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/activation_button_primary"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:maxWidth="250dp"
+                android:text="CONECTAR"
+                android:textColor="@color/button_text"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/recheckButton"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/activation_button_secondary"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:maxWidth="250dp"
                 android:text="VERIFICAR"
                 android:textColor="@color/text_primary"
                 android:textSize="12sp"
@@ -124,7 +149,7 @@
             android:id="@+id/activationStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
+            android:layout_marginTop="18dp"
             android:text="Aguardando cadastro no painel..."
             android:textColor="@color/warning"
             android:textSize="13sp" />
@@ -133,9 +158,9 @@
             android:id="@+id/activationHint"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="7dp"
             android:gravity="center"
-            android:text="Use o código acima no cadastro do dispositivo."
+            android:text="Depois de cadastrar o MAC, toque em CONECTAR ou aguarde a verificação automática."
             android:textColor="@color/text_secondary"
             android:textSize="11sp" />
     </LinearLayout>
