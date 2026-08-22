@@ -20,11 +20,15 @@ data class RadioStation(
 )
 
 class RadioRepository(private val context: Context) {
-    private val assetFiles = listOf(
-        "radio_stations.csv",
-        "radio_stations_gospel.csv",
-        "radio_stations_hard_gospel_extra.csv",
-        "radio_stations_pop_rock_curated.csv",
+    private val assetFiles = listOf("radio_stations_nacionais.csv")
+    private val categoryOrder = listOf(
+        "Nacionais • Pop",
+        "Nacionais • Sertanejo",
+        "Nacionais • Gospel",
+        "Nacionais • Rock",
+        "Nacionais • Heavy Rock",
+        "Nacionais • Blues",
+        "Nacionais • Jazz",
     )
 
     @Volatile
@@ -32,18 +36,23 @@ class RadioRepository(private val context: Context) {
 
     fun allStations(): List<RadioStation> {
         cachedStations?.let { return it }
+        val order = categoryOrder.withIndex().associate { it.value to it.index }
         val stations = assetFiles.flatMap { parseAsset(it) }
-            .filter { it.name.isNotBlank() && it.streamUrl.startsWith("http", true) }
+            .filter {
+                it.name.isNotBlank() &&
+                    it.streamUrl.startsWith("http", true) &&
+                    it.country.equals("Brasil", true)
+            }
             .distinctBy { it.streamUrl.lowercase(Locale.ROOT) }
-            .sortedWith(compareBy({ it.category.lowercase(Locale.ROOT) }, { it.name.lowercase(Locale.ROOT) }))
+            .sortedWith(compareBy({ order[it.category] ?: Int.MAX_VALUE }, { it.name.lowercase(Locale.ROOT) }))
         cachedStations = stations
         return stations
     }
 
-    fun categories(): List<String> = allStations()
-        .map { it.category.ifBlank { "Rádios" } }
-        .distinct()
-        .sortedBy { it.lowercase(Locale.ROOT) }
+    fun categories(): List<String> {
+        val available = allStations().map { it.category.ifBlank { "Nacionais" } }.toSet()
+        return categoryOrder.filter { it in available } + available.filterNot { it in categoryOrder }.sorted()
+    }
 
     fun filter(category: String = "Todas", query: String = ""): List<RadioStation> {
         val normalizedQuery = query.trim().lowercase(Locale.ROOT)

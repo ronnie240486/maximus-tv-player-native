@@ -796,7 +796,7 @@ class MainActivity : Activity() {
 
     private fun renderCategories() {
         if (radioMode) {
-            renderCategoryButtons(listOf("Todos") + radioEntries.map { it.groupTitle }.distinct().sorted())
+            renderCategoryButtons(listOf("Todos") + radioRepository.categories())
             return
         }
         if (databaseBackedCatalog) {
