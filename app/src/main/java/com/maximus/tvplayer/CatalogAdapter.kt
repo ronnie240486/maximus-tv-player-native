@@ -50,6 +50,8 @@ class CatalogAdapter(
             setTextColor(Color.rgb(111, 120, 149))
             textSize = 11f
             gravity = Gravity.CENTER
+            setSingleLine(true)
+            maxLines = 1
             layoutParams = LinearLayout.LayoutParams(34, -1)
         }
         val title = TextView(context).apply {

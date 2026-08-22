@@ -10,6 +10,14 @@ cases = {
     'Pica-Pau - Temporada 3 - Episódio 04': ('Pica-Pau', '3', '4'),
     'Pica-Pau Season 4 Episode 7': ('Pica-Pau', '4', '7'),
 }
+def clean_display_name(value):
+    value = re.sub(r"\s+[\"']?(?:tvg-logo|group-title|tvg-id|tvg-name|tvg-type|tvg-chno|group)\s*=.*$", "", value, flags=re.I)
+    return re.sub(r"\s{2,}", " ", value.strip()).strip("\"'")
+
+assert clean_display_name('Snoopy (2026)" tvg-logo="https://image') == 'Snoopy (2026)'
+assert clean_display_name("Avatar Aang (2026)' group-title='Filmes'") == 'Avatar Aang (2026)'
+print('OK: malformed title attributes are removed')
+
 for name, expected in cases.items():
     season_match = season_re.search(name)
     combined_match = combined_re.search(name)

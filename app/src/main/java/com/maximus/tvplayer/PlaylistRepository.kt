@@ -15,7 +15,7 @@ class PlaylistRepository(private val context: Context) {
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
-        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*\\\"([^\\\"]*)\\\"", RegexOption.IGNORE_CASE)
+        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)')", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
         private val SERIES_SEASON_PATTERN = Regex("(?:^|[\\s._-])(?:S|Season|Temporada)\\s*0*(\\d{1,2})|(?:^|[\\s._-])0*(\\d{1,2})\\s*[ªº]?\\s*Temporada", RegexOption.IGNORE_CASE)
         private val SERIES_EPISODE_PATTERN = Regex("(?:^|[\\s._-])(?:E|EP|Episode|Epis[oó]dio)\\s*0*(\\d{1,4})", RegexOption.IGNORE_CASE)
@@ -117,7 +117,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
-        if (metadata.getInt("format_version", 0) != 4) return true
+        if (metadata.getInt("format_version", 0) != 5) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -128,7 +128,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 4).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 5).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -266,8 +266,11 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun addEntry(info: String, streamUrl: String, emit: (CatalogEntry) -> Unit) {
-        val attributes = ATTRIBUTE_PATTERN.findAll(info).associate { it.groupValues[1].lowercase() to it.groupValues[2].trim() }
-        val displayName = info.substringAfter(',', attributes["tvg-name"].orEmpty()).trim()
+        val attributes = ATTRIBUTE_PATTERN.findAll(info).associate {
+            it.groupValues[1].lowercase() to (it.groupValues[2].ifBlank { it.groupValues[3] }).trim()
+        }
+        val rawName = attributes["tvg-name"].orEmpty().ifBlank { info.substringAfter(',', "") }.trim()
+        val displayName = cleanDisplayName(rawName)
         if (displayName.isBlank() || streamUrl.isBlank()) return
         val group = attributes["group-title"].orEmpty().ifBlank { "Sem categoria" }
         val kind = classify(displayName, group)
@@ -331,6 +334,12 @@ class PlaylistRepository(private val context: Context) {
         val group = explicitGroup.ifBlank { inferredGroup }.ifBlank { name.trim() }
         return SeriesParts(group = group, season = season, episode = episode)
     }
+
+    private fun cleanDisplayName(value: String): String = value
+        .replace(Regex("\\s+[\\\"']?(?:tvg-logo|group-title|tvg-id|tvg-name|tvg-type|tvg-chno|group)\\s*=.*$", RegexOption.IGNORE_CASE), "")
+        .trim()
+        .replace(Regex("^[\\\"']+|[\\\"']+$"), "")
+        .replace(Regex("\\s{2,}"), " ")
 
     private fun firstAttribute(attributes: Map<String, String>, vararg keys: String): String {
         keys.forEach { key -> attributes[key.lowercase()]?.trim()?.takeIf { it.isNotBlank() }?.let { return it } }

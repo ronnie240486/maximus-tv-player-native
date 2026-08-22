@@ -59,6 +59,7 @@ class MainActivity : Activity() {
     private lateinit var brandMark: TextView
     private lateinit var brandSubtitle: TextView
     private lateinit var searchHint: TextView
+    private lateinit var liveHeader: TextView
     private lateinit var greeting: TextView
     private lateinit var channelHeading: TextView
     private lateinit var videoPreviewText: TextView
@@ -198,6 +199,7 @@ class MainActivity : Activity() {
         categoryList = findViewById(R.id.categoryList)
         navItems = findViewById(R.id.navItems)
         searchHint = findViewById(R.id.searchHint)
+        liveHeader = findViewById(R.id.liveHeader)
         greeting = findViewById(R.id.greeting)
         channelHeading = findViewById(R.id.channelHeading)
         videoPreviewText = findViewById(R.id.videoPreviewText)
@@ -361,6 +363,11 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         favoritesOnly = false
         currentKind = kind
+        liveHeader.text = when (kind) {
+            MediaKind.LIVE -> "◉  Live TV"
+            MediaKind.MOVIE -> "◉  Filmes"
+            MediaKind.SERIES -> "◉  Séries"
+        }
         selectedCategory = "Todos"
         query = ""
         searchHint.text = searchPlaceholder()
@@ -382,6 +389,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         favoritesOnly = true
+        liveHeader.text = "◉  Favoritos"
         selectedCategory = "Todos"
         query = ""
         searchHint.text = "Buscar favoritos..."
@@ -611,7 +619,7 @@ class MainActivity : Activity() {
                 if (!resolved && videoId != null) {
                     resolved = true
                     view.alpha = 1f
-                    view.loadUrl(youtubeEmbedUrl(videoId))
+                    loadYoutubeEmbed(view, videoId)
                 } else if (attempt < 10) {
                     view.postDelayed({ resolveFirstResult(view, attempt + 1) }, 700L)
                 }
@@ -647,7 +655,11 @@ class MainActivity : Activity() {
 
     private fun youtubeEmbedUrl(videoId: String): String {
         val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        return "https://www.youtube.com/embed/$safeId?autoplay=1&controls=1&playsinline=1&rel=0&modestbranding=1&fs=1"
+        return "https://www.youtube.com/embed/$safeId?autoplay=1&controls=1&playsinline=1&rel=0&modestbranding=1&fs=1&enablejsapi=1&origin=https%3A%2F%2Fwww.youtube.com"
+    }
+
+    private fun loadYoutubeEmbed(webView: WebView, videoId: String) {
+        webView.loadUrl(youtubeEmbedUrl(videoId), mapOf("Referer" to "https://www.youtube.com/"))
     }
 
     private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
@@ -671,19 +683,22 @@ class MainActivity : Activity() {
         stopMiniPlayer()
         val webView = createYoutubeWebView()
         webView.webViewClient = WebViewClient()
-        webView.loadUrl(youtubeEmbedUrl(videoId))
+        loadYoutubeEmbed(webView, videoId)
         registerTrailerView(entry, webView)
     }
 
     private fun youtubeVideoId(value: String): String? {
         val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return null
-        return when {
-            uri.host?.contains("youtu.be", true) == true -> uri.pathSegments.firstOrNull()
+        val pathSegments = uri.pathSegments
+        val rawId = when {
+            uri.host?.contains("youtu.be", true) == true -> pathSegments.firstOrNull()
             uri.getQueryParameter("v").orEmpty().isNotBlank() -> uri.getQueryParameter("v")
-            uri.pathSegments.contains("shorts") -> uri.pathSegments.getOrNull(uri.pathSegments.indexOf("shorts") + 1)
-            uri.pathSegments.contains("embed") -> uri.pathSegments.getOrNull(uri.pathSegments.indexOf("embed") + 1)
+            pathSegments.indexOfFirst { it.equals("shorts", true) } >= 0 -> pathSegments.getOrNull(pathSegments.indexOfFirst { it.equals("shorts", true) } + 1)
+            pathSegments.indexOfFirst { it.equals("embed", true) } >= 0 -> pathSegments.getOrNull(pathSegments.indexOfFirst { it.equals("embed", true) } + 1)
+            value.matches(Regex("[A-Za-z0-9_-]{11}")) -> value
             else -> null
-        }?.takeIf { it.isNotBlank() }
+        }
+        return rawId?.replace(Regex("[^A-Za-z0-9_-]"), "")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
     }
 
     private fun startYoutubeTrailerPreview(entry: CatalogEntry, trailerUrl: String) {
