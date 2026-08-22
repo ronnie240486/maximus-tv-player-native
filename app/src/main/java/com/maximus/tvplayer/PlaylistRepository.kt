@@ -117,7 +117,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
-        if (metadata.getInt("format_version", 0) != 6) return true
+        if (metadata.getInt("format_version", 0) != 7) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -128,7 +128,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 6).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 7).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -331,8 +331,21 @@ class PlaylistRepository(private val context: Context) {
         val inferredGroup = seasonMatch?.range?.first?.let { name.substring(0, it) }
             ?.trim()?.trim('-', '–', '_', '.', '|')
             .orEmpty()
-        val group = explicitGroup.ifBlank { inferredGroup }.ifBlank { name.trim() }
+        val group = normalizeSeriesGroup(explicitGroup.ifBlank { inferredGroup }.ifBlank { name.trim() })
         return SeriesParts(group = group, season = season, episode = episode)
+    }
+
+    private fun normalizeSeriesGroup(value: String): String {
+        val cleaned = cleanDisplayName(value)
+        val withoutEpisode = cleaned.replace(
+            Regex("\\s*(?:[-|:]+\\s*)?(?:S\\s*0*\\d{1,2}\\s*E(?:P)?\\s*0*\\d{1,4}|(?:E|EP|Episode|Epis[oó]dio)\\s*0*\\d{1,4})\\b.*$", RegexOption.IGNORE_CASE),
+            "",
+        )
+        val withoutSeason = withoutEpisode.replace(
+            Regex("\\s*(?:[-|:]+\\s*)?(?:0*\\d{1,2}\\s*[ªº]?\\s*Temporada|Temporada\\s*0*\\d{1,2}|Season\\s*0*\\d{1,2})\\b.*$", RegexOption.IGNORE_CASE),
+            "",
+        )
+        return withoutSeason.trim().trim('-', '–', '_', '.', '|').replace(Regex("\\s{2,}"), " ").ifBlank { cleaned }
     }
 
     private fun cleanDisplayName(value: String): String = value

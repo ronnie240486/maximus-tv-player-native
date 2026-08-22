@@ -10,9 +10,15 @@ cases = {
     'Pica-Pau - Temporada 3 - Episódio 04': ('Pica-Pau', '3', '4'),
     'Pica-Pau Season 4 Episode 7': ('Pica-Pau', '4', '7'),
 }
+
 def clean_display_name(value):
-    value = re.sub(r"\s+[\"']?(?:tvg-logo|group-title|tvg-id|tvg-name|tvg-type|tvg-chno|group)\s*=.*$", "", value, flags=re.I)
+    value = re.sub(r"[\"']?\s*(?:tvg-logo|group-title|tvg-id|tvg-name|tvg-type|tvg-chno|group)\s*=.*$", "", value, flags=re.I)
     return re.sub(r"\s{2,}", " ", value.strip()).strip("\"'")
+
+def normalize_series_group(value):
+    without_episode = re.sub(r"\s*(?:[-|:]+\s*)?(?:S\s*0*\d{1,2}\s*E(?:P)?\s*0*\d{1,4}|(?:E|EP|Episode|Epis[oó]dio)\s*0*\d{1,4})\b.*$", "", value, flags=re.I)
+    without_season = re.sub(r"\s*(?:[-|:]+\s*)?(?:0*\d{1,2}\s*[ªº]?\s*Temporada|Temporada\s*0*\d{1,2}|Season\s*0*\d{1,2})\b.*$", "", without_episode, flags=re.I)
+    return without_season.strip().strip('-–_.|') or value.strip()
 
 assert clean_display_name('Snoopy (2026)" tvg-logo="https://image') == 'Snoopy (2026)'
 assert clean_display_name("Avatar Aang (2026)' group-title='Filmes'") == 'Avatar Aang (2026)'
@@ -28,4 +34,8 @@ for name, expected in cases.items():
     actual = (group, season, episode)
     assert actual == expected, (name, actual, expected)
     print(f'OK: {name} -> group={group!r}, season={season}, episode={episode}')
+
+normalized = [normalize_series_group(name) for name in ('The Walking Dead: Dead City S01E01', 'The Walking Dead: Dead City S01E02', 'The Walking Dead: Dead City S02E13')]
+assert normalized == ['The Walking Dead: Dead City'] * 3, normalized
+print('OK: three episodes produce one series name')
 print(f'{len(cases)} series naming cases passed')

@@ -98,7 +98,7 @@ class CatalogDatabase(context: Context) {
     private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
         val db = helper.readableDatabase
         val (sourceFilter, sourceArgs) = seriesFilter("source", group, search, hidden)
-        val sourceIdentity = "CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END"
+        val sourceIdentity = "LOWER(TRIM(CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END))"
         val cardOrder = if (sortAlphabetically) "card.name COLLATE NOCASE ASC" else "card.rowid ASC"
         val sql = "SELECT card.* FROM $TABLE card INNER JOIN (" +
             "SELECT MIN(source.rowid) AS first_rowid FROM $TABLE source WHERE $sourceFilter GROUP BY $sourceIdentity" +

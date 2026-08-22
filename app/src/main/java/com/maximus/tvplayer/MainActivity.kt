@@ -605,12 +605,16 @@ class MainActivity : Activity() {
     }
 
     private fun handleEntryClick(entry: CatalogEntry) {
+        val sameEntry = miniPlayerEntryKey == entry.key
         if (isSeriesRootEntry(entry)) {
-            selectEntry(entry, true)
-            showSeriesSeasonsDialog(entry)
+            if (sameEntry && previewMode == PreviewMode.TRAILER) {
+                showSeriesSeasonsDialog(entry)
+            } else {
+                selectEntry(entry, true)
+                startTrailerPreview(entry)
+            }
             return
         }
-        val sameEntry = miniPlayerEntryKey == entry.key
         if (sameEntry && previewMode == PreviewMode.TRAILER) {
             startContentPreview(entry)
             return
@@ -884,7 +888,8 @@ class MainActivity : Activity() {
         val actions = mutableListOf<Pair<String, () -> Unit>>()
         val isSeriesRoot = isSeriesRootEntry(entry)
         val primaryLabel = when {
-            isSeriesRoot -> "☷  ABRIR TEMPORADAS"
+            isSeriesRoot && miniPlayerEntryKey == entry.key && previewMode == PreviewMode.TRAILER -> "☷  ABRIR TEMPORADAS"
+            isSeriesRoot -> "▶  TRAILER DA SÉRIE"
             entry.kind == MediaKind.MOVIE -> "▶  TRAILER NO YOUTUBE"
             entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> "▶  REPRODUZIR EPISÓDIO"
             else -> "▶  REPRODUZIR"
@@ -892,9 +897,9 @@ class MainActivity : Activity() {
         actions += primaryLabel to {
             val sameEntry = miniPlayerEntryKey == entry.key
             when {
-                isSeriesRoot -> showSeriesSeasonsDialog(entry)
-                sameEntry && previewMode == PreviewMode.TRAILER -> startContentPreview(entry)
+                sameEntry && previewMode == PreviewMode.TRAILER -> if (isSeriesRoot) showSeriesSeasonsDialog(entry) else startContentPreview(entry)
                 sameEntry && previewMode == PreviewMode.CONTENT -> expandMiniPlayer()
+                isSeriesRoot -> startTrailerPreview(entry)
                 entry.kind == MediaKind.MOVIE -> startTrailerPreview(entry)
                 entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> startTrailerPreview(entry)
                 else -> startMiniPlayer(entry)
@@ -981,7 +986,7 @@ class MainActivity : Activity() {
         val showTitle = seriesTitle(entry)
         val (dialog, list) = createCatalogDialog(
             title = showTitle,
-            subtitle = "TEMPORADA ${season.padStart(2, '0')}  •  primeiro clique inicia o preview, segundo clique expande",
+            subtitle = "TEMPORADA ${season.padStart(2, '0')}  •  selecione um episódio para assistir em tela cheia",
             onBack = { showSeriesSeasonsDialog(entry) },
         )
         seriesEpisodesDialog = dialog
@@ -996,18 +1001,8 @@ class MainActivity : Activity() {
                     val code = episode.episode.takeIf { it.isNotBlank() }?.let { "E${it.padStart(2, '0')}" } ?: "EP"
                     val episodeTitle = episode.name.removePrefix("${showTitle} ").trim().ifBlank { episode.name }
                     list.addView(dialogButton("$code  •  $episodeTitle") {
-                        val sameEntry = miniPlayerEntryKey == episode.key
-                        when {
-                            sameEntry && previewMode == PreviewMode.TRAILER -> startContentPreview(episode)
-                            sameEntry && previewMode == PreviewMode.CONTENT -> {
-                                dialog.dismiss()
-                                expandMiniPlayer()
-                            }
-                            else -> {
-                                selectEntry(episode, false)
-                                startTrailerPreview(episode)
-                            }
-                        }
+                        dialog.dismiss()
+                        openEntry(episode)
                     })
                 }
             }
