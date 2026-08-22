@@ -666,12 +666,17 @@ class MainActivity : Activity() {
     }
 
     private fun configureExplicitFocusGraph() {
+        fun ensureFocusId(view: View?): Int? {
+            if (view == null) return null
+            if (view.id == View.NO_ID) view.id = View.generateViewId()
+            return view.id
+        }
         fun link(source: View?, left: View? = null, right: View? = null, up: View? = null, down: View? = null) {
-            if (source == null || source.id == View.NO_ID) return
-            left?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusLeftId = it.id }
-            right?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusRightId = it.id }
-            up?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusUpId = it.id }
-            down?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusDownId = it.id }
+            val sourceId = ensureFocusId(source) ?: return
+            ensureFocusId(left)?.let { source?.nextFocusLeftId = it }
+            ensureFocusId(right)?.let { source?.nextFocusRightId = it }
+            ensureFocusId(up)?.let { source?.nextFocusUpId = it }
+            ensureFocusId(down)?.let { source?.nextFocusDownId = it }
         }
 
         val selectedNav = (0 until navItems.childCount)
@@ -1838,11 +1843,10 @@ class MainActivity : Activity() {
         } else if (isSeriesRoot) "☷  Abrir temporadas" else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
         if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) enrichEntryMetadata(entry)
-        if (!databaseBackedCatalog || radioMode) {
-            catalogAdapter.submit(visibleItems(), selectedEntry?.key)
-        } else {
-            catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
-        }
+        // Do not submit/replace the adapter from a focus-change callback. The
+        // CatalogAdapter invokes selectEntry when a row gains focus; rebuilding
+        // the RecyclerView here destroys the focused ViewHolder and Android then
+        // falls back to the sidebar. Data is submitted only by renderCatalog/loadNextPage.
         if (requestFocus) {
             channelList.post {
                 configureExplicitFocusGraph()
