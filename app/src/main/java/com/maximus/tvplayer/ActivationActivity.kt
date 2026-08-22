@@ -104,6 +104,7 @@ class ActivationActivity : Activity() {
             .replace(Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE), "servidor da lista")
         return when {
             reason.contains("403") -> "A lista foi recusada pelo servidor (HTTP 403). Verifique a URL/credenciais no painel."
+            reason.contains("522") -> "O servidor da lista não respondeu (HTTP 522). Tentando novamente ou usando o cache local."
             reason.contains("timeout", true) || reason.contains("timed out", true) -> "O servidor da lista demorou demais para responder."
             reason.contains("HTML", true) -> "O servidor devolveu uma página de bloqueio, não uma lista M3U."
             safeReason.isNotBlank() -> "Falha ao baixar a lista do painel: $safeReason"

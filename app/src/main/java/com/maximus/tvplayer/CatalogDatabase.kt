@@ -28,22 +28,24 @@ class CatalogDatabase(context: Context) {
         try {
             db.delete(TABLE, null, null)
             val statement = db.compileStatement(
-                "INSERT INTO $TABLE " +
+                "INSERT OR IGNORE INTO $TABLE " +
                     "(item_key,name,group_title,tvg_id,logo_url,stream_url,kind,quality,series_group,season,episode,year,synopsis,cast,backdrop_url,trailer_url,runtime) " +
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             )
             feed { entry ->
                 statement.clearBindings()
                 bind(statement, entry)
-                statement.executeInsert()
-                total++
-                when (entry.kind) {
-                    MediaKind.LIVE -> liveCount++
-                    MediaKind.MOVIE -> movieCount++
-                    MediaKind.SERIES -> seriesCount++
+                val insertedRowId = statement.executeInsert()
+                if (insertedRowId != -1L) {
+                    total++
+                    when (entry.kind) {
+                        MediaKind.LIVE -> liveCount++
+                        MediaKind.MOVIE -> movieCount++
+                        MediaKind.SERIES -> seriesCount++
+                    }
+                    groups += entry.groupTitle
+                    if (total % 2_000 == 0) onProgress((60 + total / 8_000).coerceAtMost(94))
                 }
-                groups += entry.groupTitle
-                if (total % 2_000 == 0) onProgress((60 + total / 8_000).coerceAtMost(94))
             }
             db.setTransactionSuccessful()
         } finally {
