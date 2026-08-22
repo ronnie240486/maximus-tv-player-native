@@ -263,6 +263,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
+                tag = label
                 clipChildren = false
                 clipToPadding = false
                 setPadding(0, 6, 0, 6)
@@ -278,10 +279,7 @@ class MainActivity : Activity() {
                     }
                 }
                 setOnFocusChangeListener { view, hasFocus ->
-                    val active = hasFocus || isNavigationSelected(label)
-                    view.background = rounded(if (active) 0x333FE7EF else 0x00111629, 12f)
-                    icon.alpha = if (active) 1f else 0.72f
-                    caption.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                    updateNavigationVisuals(if (hasFocus) view else navItems.findFocus())
                 }
             }
             icon = ImageView(this).apply {
@@ -296,9 +294,9 @@ class MainActivity : Activity() {
                 text = captionText
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                textSize = 11f
+                textSize = 12f
                 setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 26)
+                layoutParams = LinearLayout.LayoutParams(-1, 38)
             }
             row.addView(icon)
             row.addView(caption)
@@ -307,10 +305,24 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updateNavigationVisuals(focusedView: View?) {
+        for (index in 0 until navItems.childCount) {
+            val child = navItems.getChildAt(index)
+            val row = child as? LinearLayout ?: continue
+            val label = row.tag as? String ?: continue
+            val active = if (focusedView != null) child === focusedView else isNavigationSelected(label)
+            row.background = rounded(if (active) 0x333FE7EF else 0x00111629, 12f)
+            (row.getChildAt(0) as? ImageView)?.alpha = if (active) 1f else 0.72f
+            (row.getChildAt(1) as? TextView)?.setTextColor(
+                if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199)
+            )
+        }
+    }
+
     private fun isNavigationSelected(label: String): Boolean = when {
         homeMode -> label == "INÍCIO"
         favoritesOnly -> label == "FAVORITOS"
-        currentKind == MediaKind.LIVE -> label == "CANAIS" || label == "INÍCIO"
+        currentKind == MediaKind.LIVE -> label == "CANAIS"
         currentKind == MediaKind.MOVIE -> label == "FILMES"
         else -> label == "SÉRIES"
     }
