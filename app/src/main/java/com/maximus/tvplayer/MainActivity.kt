@@ -986,8 +986,8 @@ class MainActivity : Activity() {
         val actions = mutableListOf<Pair<String, () -> Unit>>()
         val isSeriesRoot = isSeriesRootEntry(entry)
         val primaryLabel = when {
-            isSeriesRoot && miniPlayerEntryKey == entry.key && previewMode == PreviewMode.TRAILER -> "☷  ABRIR TEMPORADAS"
-            isSeriesRoot -> "▶  TRAILER DA SÉRIE"
+            isSeriesRoot && miniPlayerEntryKey == entry.key && previewMode == PreviewMode.TRAILER -> "☷  TEMPORADAS"
+            isSeriesRoot -> "▶  REPRODUZIR SÉRIE"
             entry.kind == MediaKind.MOVIE -> "▶  TRAILER NO YOUTUBE"
             entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> "▶  REPRODUZIR EPISÓDIO"
             else -> "▶  REPRODUZIR"
@@ -1006,28 +1006,33 @@ class MainActivity : Activity() {
         if (entry.kind == MediaKind.SERIES && !isSeriesRoot) {
             actions += "☷  TEMPORADAS" to { showSeriesSeasonsDialog(entry) }
         }
-        actions += (if (isFavorite) "♥  Favorito" else "♡  Favoritar") to {
+        actions += (if (isFavorite) "♥  FAVORITO" else "♡  FAVORITAR") to {
             toggleFavorite(entry)
             renderActions(entry)
             renderCatalog()
         }
-        actions += "⌕  Buscar" to { showSearchDialog() }
+        actions += "⌕  BUSCAR" to { showSearchDialog() }
         actions.forEachIndexed { index, (label, clickAction) ->
             val action = TextView(this).apply {
                 text = label
                 gravity = Gravity.CENTER
-                textSize = 11f
+                textSize = 12f
+                maxLines = 1
                 isFocusable = true
                 isClickable = true
-                setPadding(14, 10, 14, 10)
-                setTextColor(if (index == 0) Color.rgb(5, 6, 10) else Color.WHITE)
-                background = rounded(if (index == 0) 0xFF4CE8F0 else 0xFF1B2036, 8f)
+                setPadding(dp(22), dp(12), dp(22), dp(12))
+                setTextColor(Color.WHITE)
+                elevation = dp(6).toFloat()
+                background = actionButtonBackground(index == 0, false)
                 setOnFocusChangeListener { view, hasFocus ->
-                    view.background = rounded(if (index == 0 || hasFocus) 0xFF4CE8F0 else 0xFF1B2036, 8f)
-                    (view as TextView).setTextColor(if (index == 0 || hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
+                    view.background = actionButtonBackground(index == 0, hasFocus)
+                    (view as TextView).setTextColor(Color.WHITE)
                 }
                 setOnClickListener { clickAction() }
-                layoutParams = LinearLayout.LayoutParams(-2, 44).apply { setMargins(0, 0, 8, 0) }
+                layoutParams = LinearLayout.LayoutParams(-2, dp(66)).apply {
+                    minWidth = dp(if (index == 0) 230 else 160)
+                    setMargins(0, 0, dp(12), dp(6))
+                }
             }
             actionRow.addView(action)
         }
@@ -1649,6 +1654,18 @@ class MainActivity : Activity() {
         currentKind == MediaKind.MOVIE -> "Buscar filme..."
         currentKind == MediaKind.SERIES -> "Buscar série..."
         else -> "Buscar canal..."
+    }
+
+    private fun actionButtonBackground(primary: Boolean, focused: Boolean): GradientDrawable {
+        val colors = if (primary) {
+            if (focused) intArrayOf(0xFFFFD166.toInt(), 0xFFE58A17.toInt()) else intArrayOf(0xFF39D5E0.toInt(), 0xFF0A7084.toInt())
+        } else {
+            if (focused) intArrayOf(0xFF3FE7EF.toInt(), 0xFF1F7792.toInt()) else intArrayOf(0xFF30496E.toInt(), 0xFF131B2F.toInt())
+        }
+        return GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply {
+            cornerRadius = dp(12).toFloat()
+            setStroke(dp(1), if (focused || primary) 0xFF7DF8FF.toInt() else 0xFF52698F.toInt())
+        }
     }
 
     private fun rounded(color: Long, radius: Float): GradientDrawable = GradientDrawable().apply {
