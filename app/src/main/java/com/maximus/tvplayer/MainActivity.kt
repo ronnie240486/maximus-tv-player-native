@@ -107,6 +107,7 @@ class MainActivity : Activity() {
     private var miniPlayerEntryKey: String? = null
     private var miniPlayerDialog: Dialog? = null
     private var miniTrailerView: WebView? = null
+    private var radioVisualizer: RadioWaveView? = null
     private var previewMode = PreviewMode.NONE
     private var previewScale = PreviewScale.NORMAL
     private var seriesSeasonsDialog: Dialog? = null
@@ -1127,6 +1128,12 @@ class MainActivity : Activity() {
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
         videoPreview.addView(playerView, 1)
+        if (radioMode && entry.kind == MediaKind.LIVE) {
+            radioVisualizer = RadioWaveView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
+            }
+            videoPreview.addView(radioVisualizer, minOf(4, videoPreview.childCount))
+        }
         playerView.setOnClickListener { handleEntryClick(entry) }
         val player = ExoPlayer.Builder(this).build()
         playerView.player = player
@@ -1380,6 +1387,11 @@ class MainActivity : Activity() {
             it.destroy()
         }
         miniTrailerView = null
+        radioVisualizer?.let { visualizer ->
+            (visualizer.parent as? ViewGroup)?.removeView(visualizer)
+            visualizer.stopAnimation()
+        }
+        radioVisualizer = null
         previewScaleButton.visibility = View.GONE
         previewScale = PreviewScale.NORMAL
         miniPlayer?.release()
