@@ -23,6 +23,7 @@ import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -143,6 +144,7 @@ class MainActivity : Activity() {
     private var remoteConfig: RemoteAppConfig? = null
     private var radioEntries: List<CatalogEntry> = emptyList()
     private var focusCatalogWhenReady = false
+    private var focusCategoryWhenReady = false
     private var parentalUnlocked = false
     private var catalogImportInProgress = false
     private var catalogImportWatcherStarted = false
@@ -344,6 +346,7 @@ class MainActivity : Activity() {
         if (focused === searchHint) {
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
+                KeyEvent.KEYCODE_DPAD_UP -> focusNavigationForCurrentSection()
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCategory() || focusFirstCatalogItem()
                 KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
                 else -> false
@@ -354,7 +357,7 @@ class MainActivity : Activity() {
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> focusNavigation(index - 1)
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusNavigation(index + 1)
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCatalogItem() || focusFirstCategory() || focusPreview()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory() || focusFirstCatalogItem() || focusPreview()
                 KeyEvent.KEYCODE_DPAD_LEFT -> true
                 else -> false
             }
@@ -371,9 +374,9 @@ class MainActivity : Activity() {
                         renderCategories()
                         renderCatalog()
                     }
-                    if (index <= 0) focusNavigationForCurrentSection() else categoryList.getChildAt(index - 1).requestFocus()
+                    if (index <= 0) focusNavigationForCurrentSection() else focusCategoryAt(index - 1)
                 }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> if (index >= categoryList.childCount - 1) focusFirstCatalogItem() else categoryList.getChildAt(index + 1).requestFocus()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (index >= categoryList.childCount - 1) focusFirstCatalogItem() else focusCategoryAt(index + 1)
                 KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCatalogItem()
                 else -> false
@@ -385,7 +388,8 @@ class MainActivity : Activity() {
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
                 KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
-                KeyEvent.KEYCODE_DPAD_UP -> if (position <= 0) focusFirstCategory() || searchHint.requestFocus() else false
+                KeyEvent.KEYCODE_DPAD_UP -> if (position <= 0) focusFirstCategory() || searchHint.requestFocus() else moveCatalogFocus(-1)
+                KeyEvent.KEYCODE_DPAD_DOWN -> moveCatalogFocus(1)
                 else -> false
             }
         }
@@ -403,6 +407,7 @@ class MainActivity : Activity() {
                 return when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
                     KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
                     KeyEvent.KEYCODE_DPAD_DOWN -> focusAction(index + 1)
                     else -> false
                 }
@@ -457,11 +462,52 @@ class MainActivity : Activity() {
         return target?.requestFocus() == true
     }
 
-    private fun focusFirstCategory(): Boolean = categoryList.getChildAt(0)?.requestFocus() == true
+    private fun focusFirstCategory(): Boolean {
+        if (categoryList.childCount == 0) {
+            focusCategoryWhenReady = true
+            return true
+        }
+        return focusCategoryAt(0)
+    }
+
+    private fun focusCategoryAt(index: Int): Boolean {
+        val target = categoryList.getChildAt(index.coerceIn(0, (categoryList.childCount - 1).coerceAtLeast(0))) ?: return false
+        val focused = target.requestFocus()
+        if (focused) {
+            categoryList.parent?.let { parent ->
+                if (parent is HorizontalScrollView) parent.smoothScrollTo(target.left, 0)
+            }
+        }
+        return focused
+    }
 
     private fun focusFirstCatalogItem(): Boolean {
-        val item = channelList.getChildAt(0) ?: return false
+        val item = channelList.getChildAt(0)
+        if (item == null) {
+            focusCatalogWhenReady = true
+            return true
+        }
         return item.requestFocus()
+    }
+
+    private fun moveCatalogFocus(delta: Int): Boolean {
+        val focused = currentFocus ?: return false
+        val row = catalogRowForFocus(focused) ?: return false
+        val position = channelList.getChildAdapterPosition(row)
+        if (position == RecyclerView.NO_POSITION) return false
+        val targetPosition = position + delta
+        if (targetPosition < 0) return focusFirstCategory() || searchHint.requestFocus()
+        if (targetPosition >= catalogAdapter.itemCount) return focusFirstAction() || true
+        val attached = channelList.findViewHolderForAdapterPosition(targetPosition)?.itemView
+        if (attached != null) {
+            attached.requestFocus()
+            return true
+        }
+        channelList.smoothScrollToPosition(targetPosition)
+        channelList.postDelayed({
+            channelList.findViewHolderForAdapterPosition(targetPosition)?.itemView?.requestFocus()
+        }, 120L)
+        return true
     }
 
     private fun focusSelectedCatalogItem(): Boolean {
@@ -761,7 +807,7 @@ class MainActivity : Activity() {
         renderCategories()
         renderCatalog()
         selectFirstVisible()
-        focusCatalogWhenReady = true
+        categoryList.post { focusFirstCategory() }
     }
 
     private fun switchFavorites() {
@@ -792,7 +838,7 @@ class MainActivity : Activity() {
         renderCategories()
         renderCatalog()
         selectFirstVisible()
-        focusCatalogWhenReady = true
+        categoryList.post { focusFirstCategory() }
     }
 
     private fun renderCategories() {
@@ -815,6 +861,7 @@ class MainActivity : Activity() {
                     categoryCache[requestKind] = freshGroups
                     if (selectedCategory != "Todos" && selectedCategory !in freshGroups) selectedCategory = "Todos"
                     renderCategoryButtons(listOf("Todos") + freshGroups)
+                    if (currentFocus == null || isWithin(currentFocus, navItems)) categoryList.post { focusFirstCategory() }
                 }
             }
             return
@@ -858,6 +905,10 @@ class MainActivity : Activity() {
             item.setTextColor(if (category == selectedCategory) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
             item.background = rounded(if (category == selectedCategory) 0x334CE8F0 else 0x00111629, 18f)
             categoryList.addView(item)
+        }
+        if (focusCategoryWhenReady) {
+            focusCategoryWhenReady = false
+            categoryList.post { focusFirstCategory() }
         }
     }
 
@@ -2390,12 +2441,12 @@ class MainActivity : Activity() {
         liveHeader.text = "◉  Rádios"
         channelHeading.text = "RÁDIO ONLINE"
         searchHint.text = "Buscar estação..."
-        renderNavigation()
+                renderNavigation()
         renderCategories()
         renderCatalog()
         selectFirstVisible()
+        categoryList.post { focusFirstCategory() }
     }
-
     private fun startVoiceCommand() {
         voiceMode = true
         renderNavigation()
