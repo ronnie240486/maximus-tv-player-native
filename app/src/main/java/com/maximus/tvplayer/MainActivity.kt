@@ -707,8 +707,12 @@ class MainActivity : Activity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                if (resolved || view == null || url?.contains("youtube", true) != true) return
-                view.postDelayed({ resolveFirstResult(view, 0) }, 1_200L)
+                if (view == null || url?.contains("youtube", true) != true) return
+                if (resolved) {
+                    view.postDelayed({ enableYoutubeAudio(view) }, 1_200L)
+                } else {
+                    view.postDelayed({ resolveFirstResult(view, 0) }, 1_200L)
+                }
             }
         }
         webView.alpha = 0f
@@ -734,11 +738,26 @@ class MainActivity : Activity() {
 
     private fun youtubeVideoPageUrl(videoId: String): String {
         val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        return "https://m.youtube.com/watch?v=$safeId&autoplay=1&playsinline=1"
+        return "https://www.youtube.com/watch?v=$safeId&autoplay=1&playsinline=1&mute=0&rel=0"
     }
 
     private fun loadYoutubeVideoPage(webView: WebView, videoId: String) {
-        webView.loadUrl(youtubeVideoPageUrl(videoId), mapOf("Referer" to "https://m.youtube.com/"))
+        webView.loadUrl(youtubeVideoPageUrl(videoId), mapOf("Referer" to "https://www.youtube.com/"))
+    }
+
+    private fun enableYoutubeAudio(webView: WebView, attempt: Int = 0) {
+        if (webView.parent == null || attempt > 12) return
+        webView.evaluateJavascript(
+            """(function(){
+                var v=document.querySelector('video');
+                if(v){v.muted=false;v.defaultMuted=false;v.volume=1.0;var p=v.play();if(p&&p.catch)p.catch(function(){});}
+                var b=document.querySelector("button[aria-label*='Unmute'],button[aria-label*='Ativar som'],button.ytp-mute-button");
+                if(b&&/unmute|ativar som|sound/i.test(b.getAttribute('aria-label')||''))b.click();
+                return !!v;
+            })()""".trimIndent(),
+        ) {
+            webView.postDelayed({ enableYoutubeAudio(webView, attempt + 1) }, if (attempt < 3) 700L else 1_500L)
+        }
     }
 
     private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
@@ -763,7 +782,12 @@ class MainActivity : Activity() {
         }
         stopMiniPlayer()
         val webView = createYoutubeWebView()
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                if (view != null && url?.contains("youtube", true) == true) view.postDelayed({ enableYoutubeAudio(view) }, 1_000L)
+            }
+        }
         loadYoutubeVideoPage(webView, videoId)
         registerTrailerView(entry, webView)
     }
