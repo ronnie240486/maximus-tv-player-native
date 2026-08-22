@@ -1838,11 +1838,18 @@ class MainActivity : Activity() {
         } else if (isSeriesRoot) "☷  Abrir temporadas" else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
         if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) enrichEntryMetadata(entry)
-        if (requestFocus) channelList.requestFocus()
         if (!databaseBackedCatalog || radioMode) {
             catalogAdapter.submit(visibleItems(), selectedEntry?.key)
         } else {
             catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
+        }
+        if (requestFocus) {
+            channelList.post {
+                configureExplicitFocusGraph()
+                focusSelectedCatalogItem() || focusFirstCatalogItem()
+            }
+        } else {
+            channelList.post { configureExplicitFocusGraph() }
         }
     }
 
