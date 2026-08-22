@@ -306,6 +306,8 @@ class MainActivity : Activity() {
         searchHint.isFocusable = true
         searchHint.isClickable = true
         searchHint.setOnClickListener { showSearchDialog() }
+        (categoryList.parent as? View)?.isFocusable = false
+        (categoryList.parent as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         previewScaleButton.visibility = View.GONE
         videoPreview.isFocusable = true
         videoPreview.isClickable = true
@@ -359,6 +361,15 @@ class MainActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusNavigation(index + 1)
                 KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory() || focusFirstCatalogItem() || focusPreview()
                 KeyEvent.KEYCODE_DPAD_LEFT -> true
+                else -> false
+            }
+        }
+        if (focused === categoryList.parent) {
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCatalogItem()
+                KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCatalogItem()
                 else -> false
             }
         }
@@ -451,7 +462,11 @@ class MainActivity : Activity() {
     private fun focusNavigation(index: Int): Boolean {
         if (navItems.childCount == 0) return false
         val targetIndex = index.coerceIn(0, navItems.childCount - 1)
-        return navItems.getChildAt(targetIndex).requestFocus()
+        val target = navItems.getChildAt(targetIndex)
+        target.isFocusable = true
+        val focused = target.requestFocus()
+        if (!focused) target.post { target.requestFocus() }
+        return true
     }
 
     private fun focusNavigationForCurrentSection(): Boolean {
@@ -472,27 +487,35 @@ class MainActivity : Activity() {
 
     private fun focusCategoryAt(index: Int): Boolean {
         val target = categoryList.getChildAt(index.coerceIn(0, (categoryList.childCount - 1).coerceAtLeast(0))) ?: return false
+        target.isFocusable = true
         val focused = target.requestFocus()
-        if (focused) {
-            categoryList.parent?.let { parent ->
-                if (parent is HorizontalScrollView) parent.smoothScrollTo(target.left, 0)
-            }
+        if (!focused) target.post { target.requestFocus() }
+        categoryList.parent?.let { parent ->
+            if (parent is HorizontalScrollView) parent.smoothScrollTo(target.left, 0)
         }
-        return focused
+        return true
     }
 
     private fun focusFirstCatalogItem(): Boolean {
         val item = channelList.getChildAt(0)
         if (item == null) {
             focusCatalogWhenReady = true
+            channelList.postDelayed({
+                if (channelList.childCount > 0) focusFirstCatalogItem()
+            }, 120L)
             return true
         }
-        return item.requestFocus()
+        item.isFocusable = true
+        val focused = item.requestFocus()
+        if (!focused) item.post { item.requestFocus() }
+        channelList.smoothScrollToPosition(0)
+        return true
     }
 
     private fun moveCatalogFocus(delta: Int): Boolean {
         val focused = currentFocus ?: return false
-        val row = catalogRowForFocus(focused) ?: return false
+        val row = catalogRowForFocus(focused) ?: return focusFirstCatalogItem()
+
         val position = channelList.getChildAdapterPosition(row)
         if (position == RecyclerView.NO_POSITION) return false
         val targetPosition = position + delta
@@ -500,7 +523,8 @@ class MainActivity : Activity() {
         if (targetPosition >= catalogAdapter.itemCount) return focusFirstAction() || true
         val attached = channelList.findViewHolderForAdapterPosition(targetPosition)?.itemView
         if (attached != null) {
-            attached.requestFocus()
+            attached.isFocusable = true
+            if (!attached.requestFocus()) attached.post { attached.requestFocus() }
             return true
         }
         channelList.smoothScrollToPosition(targetPosition)
@@ -609,6 +633,7 @@ class MainActivity : Activity() {
             onClicked = { handleEntryClick(it) },
         )
         channelList.layoutManager = LinearLayoutManager(this)
+        channelList.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         channelList.adapter = catalogAdapter
         channelList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
