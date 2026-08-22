@@ -69,9 +69,7 @@ class CatalogDatabase(context: Context) {
         sortAlphabetically: Boolean,
         limit: Int,
         offset: Int,
-        seriesOnly: Boolean = false,
     ): List<CatalogEntry> {
-        if (seriesOnly) return querySeriesPage(group, search, hidden, sortAlphabetically, limit, offset)
         if (kind == null && favorites.isEmpty()) return emptyList()
         val db = helper.readableDatabase
         val where = mutableListOf<String>()
@@ -93,44 +91,6 @@ class CatalogDatabase(context: Context) {
                 while (cursor.moveToNext()) add(readEntry(cursor))
             }
         }
-    }
-
-    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
-        val db = helper.readableDatabase
-        val (filter, args) = seriesFilter("source", group, search, hidden)
-        val identity = "CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END"
-        val identityOrder = if (sortAlphabetically) "series_identity COLLATE NOCASE ASC" else "MIN(source.rowid) ASC"
-        val identitySql = "SELECT $identity AS series_identity FROM $TABLE source WHERE $filter " +
-            "GROUP BY series_identity ORDER BY $identityOrder LIMIT $limit OFFSET $offset"
-        val identities = db.rawQuery(identitySql, args.toTypedArray()).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) cursor.getString(0)?.takeIf { it.isNotBlank() }?.let { add(it) }
-            }
-        }
-        return identities.mapNotNull { seriesIdentity ->
-            val detailFilter = seriesFilter("item", group, search, hidden).first +
-                " AND CASE WHEN TRIM(item.series_group) <> '' THEN item.series_group ELSE item.name END=?"
-            val detailArgs = (seriesFilter("item", group, search, hidden).second + seriesIdentity).toTypedArray()
-            db.rawQuery(
-                "SELECT * FROM $TABLE item WHERE $detailFilter " +
-                    "ORDER BY COALESCE(CAST(NULLIF(item.season, '') AS INTEGER), 1), " +
-                    "COALESCE(CAST(NULLIF(item.episode, '') AS INTEGER), 0), item.rowid LIMIT 1",
-                detailArgs,
-            ).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
-        }
-    }
-
-    private fun seriesFilter(alias: String, group: String, search: String, hidden: Set<String>): Pair<String, List<String>> {
-        val where = mutableListOf("$alias.kind=?")
-        val args = mutableListOf(MediaKind.SERIES.name)
-        if (group != "Todos") { where += "$alias.group_title=?"; args += group }
-        if (search.isNotBlank()) {
-            where += "(LOWER($alias.name) LIKE ? OR LOWER($alias.group_title) LIKE ? OR LOWER($alias.tvg_id) LIKE ? OR LOWER($alias.series_group) LIKE ?)"
-            val value = "%${search.trim().lowercase()}%"
-            args += value; args += value; args += value; args += value
-        }
-        if (hidden.isNotEmpty()) where += "UPPER($alias.group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
-        return where.joinToString(" AND ") to args
     }
 
     fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =

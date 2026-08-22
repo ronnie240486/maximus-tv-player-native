@@ -81,11 +81,10 @@ class PlaylistRepository(private val context: Context) {
         sortAlphabetically: Boolean,
         limit: Int,
         offset: Int,
-        seriesOnly: Boolean = false,
         callback: (List<CatalogEntry>) -> Unit,
     ) {
         executor.execute {
-            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset, seriesOnly) }.getOrDefault(emptyList()))
+            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset) }.getOrDefault(emptyList()))
         }
     }
 

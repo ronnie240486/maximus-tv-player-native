@@ -539,7 +539,6 @@ class MainActivity : Activity() {
             sortAlphabetically = sortAlphabetically,
             limit = pageSize,
             offset = offset,
-            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
         ) { page ->
             runOnUiThread {
                 if (requestId != pageRequestId) return@runOnUiThread
@@ -595,8 +594,7 @@ class MainActivity : Activity() {
                 sortAlphabetically = sortAlphabetically,
                 limit = 1,
                 offset = 0,
-                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
-            ) { page ->
+                ) { page ->
                 runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
             }
             return
