@@ -117,6 +117,7 @@ class MainActivity : Activity() {
     private var categoryRequestId = 0
     private val categoryCache = mutableMapOf<MediaKind, List<String>>()
     private var selectedEntry: CatalogEntry? = null
+    private val enrichedMetadata = mutableMapOf<String, CatalogMetadata>()
     private var selectedCategory = "Todos"
     private var query = ""
     private var favoritesOnly = false
@@ -989,7 +990,8 @@ class MainActivity : Activity() {
             hasTrailer -> "▶  Trailer • ${entry.name}"
             else -> "Poster • ${entry.name}"
         }
-        val heroSource = entry.backdropUrl.ifBlank { entry.logoUrl }
+        val metadata = enrichedMetadata[entry.key]
+        val heroSource = metadata?.backdrop?.takeIf { it.isNotBlank() } ?: entry.backdropUrl.ifBlank { entry.logoUrl }
         heroImage.setImageResource(fallbackHero(entry))
         if (heroSource.isBlank()) {
             heroImage.setImageResource(fallbackHero(entry))
@@ -1001,10 +1003,13 @@ class MainActivity : Activity() {
         liveBadge.text = if (isLive) "AO VIVO" else "TRAILER"
         detailEyebrow.text = if (isLive) editorial.eyebrow.uppercase() else kindLabel(entry.kind)
         detailChannelName.text = if (isSeriesRoot) seriesTitle(entry) else entry.name
-        detailTags.text = listOf(entry.groupTitle, entry.year, entry.quality, kindLabel(entry.kind), entry.runtime)
+        detailTags.text = listOf(entry.groupTitle, metadata?.year?.ifBlank { entry.year } ?: entry.year, entry.quality, kindLabel(entry.kind), entry.runtime)
             .filter { it.isNotBlank() }.joinToString("   •   ")
         nowCard.visibility = if (isLive) View.VISIBLE else View.GONE
-        detailDescription.text = if (isLive) editorial.description else displaySynopsis(entry.synopsis).ifBlank { "Sinopse não informada na lista do painel." }
+        val synopsis = metadata?.synopsis?.takeIf { it.isNotBlank() } ?: entry.synopsis
+        detailDescription.text = if (isLive) editorial.description else displaySynopsis(synopsis).ifBlank {
+            if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) "Buscando sinopse..." else "Sinopse não informada na lista do painel."
+        }
         nowLabel.text = "AGORA"
         currentProgram.text = if (isLive) epgProgram?.title ?: editorial.currentProgram else ""
         currentProgramDescription.text = if (isLive) epgProgram?.description?.ifBlank { null } ?: editorial.currentDescription else ""
@@ -1022,8 +1027,18 @@ class MainActivity : Activity() {
 
     private fun enrichEntryMetadata(entry: CatalogEntry) {
         repository.enrichMetadata(entry) { metadata ->
-            if (metadata == null) return@enrichMetadata
+            if (metadata == null) {
+                runOnUiThread {
+                    if (selectedEntry?.key == entry.key && (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) && entry.synopsis.isBlank()) {
+                        detailDescription.text = "Sinopse não informada na lista do painel."
+                    }
+                }
+                return@enrichMetadata
+            }
             runOnUiThread {
+                if (metadata.synopsis.isNotBlank() || metadata.year.isNotBlank() || metadata.backdrop.isNotBlank() || metadata.trailer.isNotBlank()) {
+                    enrichedMetadata[entry.key] = metadata
+                }
                 if (selectedEntry?.key != entry.key) return@runOnUiThread
                 if (metadata.synopsis.isNotBlank()) detailDescription.text = displaySynopsis(metadata.synopsis)
                 if (metadata.year.isNotBlank() || metadata.backdrop.isNotBlank()) {
