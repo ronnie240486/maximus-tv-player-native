@@ -150,8 +150,16 @@ class PlaylistRepository(private val context: Context) {
 
     private fun parseXtreamSource(value: String): XtreamSource? = runCatching {
         val uri = Uri.parse(value)
-        val username = uri.getQueryParameter("username").orEmpty()
-        val password = uri.getQueryParameter("password").orEmpty()
+        var username = uri.getQueryParameter("username").orEmpty()
+        var password = uri.getQueryParameter("password").orEmpty()
+        if (username.isBlank() || password.isBlank()) {
+            val segments = uri.pathSegments
+            val typeIndex = segments.indexOfFirst { it.equals("live", true) || it.equals("movie", true) || it.equals("series", true) }
+            if (typeIndex >= 0 && segments.size > typeIndex + 2) {
+                username = segments[typeIndex + 1]
+                password = segments[typeIndex + 2]
+            }
+        }
         if (uri.scheme.isNullOrBlank() || uri.host.isNullOrBlank() || username.isBlank() || password.isBlank()) return@runCatching null
         XtreamSource("${uri.scheme}://${uri.authority}".trimEnd('/'), username, password)
     }.getOrNull()
@@ -163,11 +171,18 @@ class PlaylistRepository(private val context: Context) {
         } else {
             extractProviderId(entry.streamUrl).ifBlank { entry.tvgId.filter(Char::isDigit) }
         }
-        val providerId = directId.ifBlank { resolveProviderId(source, entry) }
-        if (providerId.isBlank()) return null
         val action = if (entry.kind == MediaKind.SERIES) "get_series_info" else "get_vod_info"
         val parameter = if (entry.kind == MediaKind.SERIES) "series_id" else "vod_id"
-        val root = requestJson(xtreamEndpoint(source, action, parameter, providerId)) ?: return null
+        val directMetadata = directId.takeIf { it.isNotBlank() }
+            ?.let { requestJson(xtreamEndpoint(source, action, parameter, it)) }
+            ?.let(::parseExternalMetadata)
+        if (directMetadata?.hasAnyData() == true) return directMetadata
+        val resolvedId = resolveProviderId(source, entry)
+        if (resolvedId.isBlank() || resolvedId == directId) return directMetadata
+        return requestJson(xtreamEndpoint(source, action, parameter, resolvedId))?.let(::parseExternalMetadata)
+    }
+
+    private fun parseExternalMetadata(root: JSONObject): CatalogMetadata {
         val info = root.optJSONObject("info") ?: root.optJSONObject("data")?.optJSONObject("info") ?: root.optJSONObject("data") ?: root
         return CatalogMetadata(
             synopsis = firstJsonText(info, "plot", "description", "desc", "synopsis", "overview", "summary"),
@@ -176,6 +191,8 @@ class PlaylistRepository(private val context: Context) {
             trailer = firstJsonText(info, "youtube_trailer", "youtube-trailer", "trailer", "trailer_url"),
         )
     }
+
+    private fun CatalogMetadata.hasAnyData(): Boolean = synopsis.isNotBlank() || year.isNotBlank() || backdrop.isNotBlank() || trailer.isNotBlank()
 
     private fun extractProviderId(streamUrl: String): String = runCatching {
         Uri.parse(streamUrl).pathSegments.asReversed().firstOrNull { segment -> segment.substringBeforeLast('.').all(Char::isDigit) }.orEmpty()
