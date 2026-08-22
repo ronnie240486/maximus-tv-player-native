@@ -97,20 +97,20 @@ class CatalogDatabase(context: Context) {
 
     private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
         val db = helper.readableDatabase
-        val (filter, baseArgs) = seriesFilter("item", group, search, hidden)
-        val identity = "CASE WHEN TRIM(item.series_group) <> '' THEN item.series_group ELSE item.name END"
-        val identityOrder = if (sortAlphabetically) "series_identity COLLATE NOCASE ASC" else "MIN(source_rowid) ASC"
-        val identitySql = "SELECT series_identity FROM (" +
-            "SELECT $identity AS series_identity, item.rowid AS source_rowid FROM $TABLE item WHERE $filter" +
-            ") GROUP BY series_identity ORDER BY $identityOrder LIMIT $limit OFFSET $offset"
-        val identities = db.rawQuery(identitySql, baseArgs.toTypedArray()).use { cursor ->
+        val (filter, args) = seriesFilter("source", group, search, hidden)
+        val identity = "CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END"
+        val identityOrder = if (sortAlphabetically) "series_identity COLLATE NOCASE ASC" else "MIN(source.rowid) ASC"
+        val identitySql = "SELECT $identity AS series_identity FROM $TABLE source WHERE $filter " +
+            "GROUP BY series_identity ORDER BY $identityOrder LIMIT $limit OFFSET $offset"
+        val identities = db.rawQuery(identitySql, args.toTypedArray()).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) cursor.getString(0)?.takeIf { it.isNotBlank() }?.let { add(it) }
             }
         }
         return identities.mapNotNull { seriesIdentity ->
-            val detailFilter = "$filter AND $identity=?"
-            val detailArgs = (baseArgs + seriesIdentity).toTypedArray()
+            val detailFilter = seriesFilter("item", group, search, hidden).first +
+                " AND CASE WHEN TRIM(item.series_group) <> '' THEN item.series_group ELSE item.name END=?"
+            val detailArgs = (seriesFilter("item", group, search, hidden).second + seriesIdentity).toTypedArray()
             db.rawQuery(
                 "SELECT * FROM $TABLE item WHERE $detailFilter " +
                     "ORDER BY COALESCE(CAST(NULLIF(item.season, '') AS INTEGER), 1), " +
