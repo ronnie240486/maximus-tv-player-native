@@ -15,7 +15,8 @@ class PlaylistRepository(private val context: Context) {
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
-        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)')", RegexOption.IGNORE_CASE)
+        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^\\s,]+))", RegexOption.IGNORE_CASE)
+        private val DESCRIPTION_PATTERN = Regex("(?:^|[\\s,])(?:description|tvg-desc|tvg-description|plot|synopsis|summary|overview)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^,\\s]+))", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
         private val SERIES_SEASON_PATTERN = Regex("(?:^|[\\s._-])(?:S|Season|Temporada)\\s*0*(\\d{1,2})|(?:^|[\\s._-])0*(\\d{1,2})\\s*[ªº]?\\s*Temporada", RegexOption.IGNORE_CASE)
         private val SERIES_EPISODE_PATTERN = Regex("(?:^|[\\s._-])(?:E|EP|Episode|Epis[oó]dio)\\s*0*(\\d{1,4})", RegexOption.IGNORE_CASE)
@@ -117,7 +118,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
-        if (metadata.getInt("format_version", 0) != 7) return true
+        if (metadata.getInt("format_version", 0) != 8) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -128,7 +129,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 7).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 8).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -267,7 +268,7 @@ class PlaylistRepository(private val context: Context) {
 
     private fun addEntry(info: String, streamUrl: String, emit: (CatalogEntry) -> Unit) {
         val attributes = ATTRIBUTE_PATTERN.findAll(info).associate {
-            it.groupValues[1].lowercase() to (it.groupValues[2].ifBlank { it.groupValues[3] }).trim()
+            it.groupValues[1].lowercase() to it.groupValues[2].ifBlank { it.groupValues[3] }.ifBlank { it.groupValues[4] }.trim()
         }
         val rawName = attributes["tvg-name"].orEmpty().ifBlank { info.substringAfter(',', "") }.trim()
         val displayName = cleanDisplayName(rawName)
@@ -275,7 +276,7 @@ class PlaylistRepository(private val context: Context) {
         val group = attributes["group-title"].orEmpty().ifBlank { "Sem categoria" }
         val kind = classify(displayName, group)
         val quality = QUALITY_PATTERN.find(displayName)?.value?.uppercase().orEmpty()
-        val synopsis = firstAttribute(attributes, "description", "tvg-desc", "tvg-description", "plot", "synopsis", "summary", "overview")
+        val synopsis = cleanMetadataText(firstAttribute(attributes, "description", "tvg-desc", "tvg-description", "plot", "synopsis", "summary", "overview").ifBlank { extractSynopsis(info) })
         val cast = firstAttribute(attributes, "cast", "actors", "actor", "elenco", "tvg-cast")
         val year = firstAttribute(attributes, "year", "release-year", "release_year", "date")
         val backdrop = cleanAssetUrl(firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "fanart_url", "background", "background-url", "background_url", "banner", "banner-url", "banner_url", "art", "art-url", "art_url", "cover_big"))
@@ -358,6 +359,24 @@ class PlaylistRepository(private val context: Context) {
         keys.forEach { key -> attributes[key.lowercase()]?.trim()?.takeIf { it.isNotBlank() }?.let { return it } }
         return ""
     }
+
+    private fun extractSynopsis(info: String): String {
+        val match = DESCRIPTION_PATTERN.find(info) ?: return ""
+        return match.groupValues[1].ifBlank { match.groupValues[2] }.ifBlank { match.groupValues[3] }
+    }
+
+    private fun cleanMetadataText(value: String): String = value
+        .replace("\\\\n", "\n")
+        .replace("\\\\\"", "\"")
+        .replace("\\\\/", "/")
+        .replace("<br>", "\n", ignoreCase = true)
+        .replace("<br/>", "\n", ignoreCase = true)
+        .replace("<br />", "\n", ignoreCase = true)
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .trim()
 
     private fun cleanAssetUrl(value: String): String = value
         .replace("&amp;", "&")
