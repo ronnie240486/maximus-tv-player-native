@@ -251,7 +251,7 @@ class MainActivity : Activity() {
                 isFocusable = true
                 isClickable = true
                 setPadding(0, 5, 0, 5)
-                layoutParams = LinearLayout.LayoutParams(-1, 106).apply { setMargins(4, 4, 4, 4) }
+                layoutParams = LinearLayout.LayoutParams(-1, 126).apply { setMargins(4, 6, 4, 6) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -274,16 +274,16 @@ class MainActivity : Activity() {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 alpha = if (isNavigationSelected(label) || index == 1) 1f else 0.72f
                 background = rounded(0x441B2036, 28f)
-                layoutParams = LinearLayout.LayoutParams(64, 64).apply { setMargins(0, 0, 0, 5) }
-                setPadding(14, 14, 14, 14)
+                layoutParams = LinearLayout.LayoutParams(82, 82).apply { setMargins(0, 0, 0, 6) }
+                setPadding(18, 18, 18, 18)
             }
             caption = TextView(this).apply {
                 text = captionText
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                textSize = 10f
+                textSize = 11f
                 setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 22)
+                layoutParams = LinearLayout.LayoutParams(-1, 26)
             }
             row.addView(icon)
             row.addView(caption)
