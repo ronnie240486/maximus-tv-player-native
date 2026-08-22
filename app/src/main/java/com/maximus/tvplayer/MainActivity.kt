@@ -279,6 +279,11 @@ class MainActivity : Activity() {
             view.background = rounded(if (hasFocus) 0xFF4CE8F0 else 0xCC101827, 10f)
             (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
         }
+        listOf<View>(detailDescription, nowCard, nextProgram).forEach { view ->
+            view.isFocusable = true
+            view.isClickable = true
+            view.setOnClickListener { }
+        }
         vodSection = findViewById(R.id.vodSection)
         vodSection.visibility = View.GONE
         vodCards = findViewById(R.id.vodCards)
@@ -405,6 +410,30 @@ class MainActivity : Activity() {
             }
         }
         if (isWithin(focused, previewScroll)) {
+            if (isWithin(focused, nowCard)) {
+                return when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusNextProgram() || true
+                    else -> false
+                }
+            }
+            if (isWithin(focused, nextProgram)) {
+                return when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || nowCard.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> true
+                    else -> false
+                }
+            }
+            if (focused === detailDescription) {
+                return when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusProgrammingArea() || true
+                    else -> false
+                }
+            }
             if (isWithin(focused, videoPreview)) {
                 return when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
@@ -418,8 +447,8 @@ class MainActivity : Activity() {
                 return when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
                     KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
-                    KeyEvent.KEYCODE_DPAD_DOWN -> focusAction(index + 1)
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusPreview()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusAction(index + 1) || focusProgrammingArea()
                     else -> false
                 }
             }
@@ -556,7 +585,31 @@ class MainActivity : Activity() {
 
     private fun focusFirstAction(): Boolean = actionRow.getChildAt(0)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
 
+    private fun focusLastAction(): Boolean {
+        for (index in actionRow.childCount - 1 downTo 0) {
+            if (focusAction(index)) return true
+        }
+        return false
+    }
+
     private fun focusAction(index: Int): Boolean = actionRow.getChildAt(index)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
+
+    private fun focusProgrammingArea(): Boolean {
+        val target = when {
+            nowCard.visibility == View.VISIBLE && nowCard.isShown -> nowCard
+            nextProgram.visibility == View.VISIBLE && nextProgram.text.isNotBlank() -> nextProgram
+            detailDescription.visibility == View.VISIBLE && detailDescription.text.isNotBlank() -> detailDescription
+            else -> null
+        } ?: return false
+        val focused = target.requestFocus()
+        if (focused) previewScroll.post { previewScroll.smoothScrollTo(0, target.top.coerceAtLeast(0)) }
+        return focused
+    }
+
+    private fun focusNextProgram(): Boolean {
+        if (nextProgram.visibility == View.VISIBLE && nextProgram.text.isNotBlank()) return nextProgram.requestFocus()
+        return false
+    }
 
     private fun isWithin(view: View?, parent: View): Boolean {
         var current = view
