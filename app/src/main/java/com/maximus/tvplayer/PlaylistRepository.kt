@@ -31,7 +31,6 @@ class PlaylistRepository(private val context: Context) {
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
-        private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^\\s,]+))", RegexOption.IGNORE_CASE)
         private val DESCRIPTION_PATTERN = Regex("(?:^|[\\s,])(?:description|tvg-desc|tvg-description|plot|synopsis|summary|overview)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^,\\s]+))", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
         private val SERIES_SEASON_PATTERN = Regex("(?:^|[\\s._-])(?:S|Season|Temporada)\\s*0*(\\d{1,2})|(?:^|[\\s._-])0*(\\d{1,2})\\s*[ªº]?\\s*Temporada", RegexOption.IGNORE_CASE)
@@ -403,9 +402,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun addEntry(info: String, streamUrl: String, emit: (CatalogEntry) -> Unit) {
-        val attributes = ATTRIBUTE_PATTERN.findAll(info).associate {
-            it.groupValues[1].lowercase() to it.groupValues[2].ifBlank { it.groupValues[3] }.ifBlank { it.groupValues[4] }.trim()
-        }
+        val attributes = parseAttributesFast(info)
         val rawName = attributes["tvg-name"].orEmpty().ifBlank { info.substringAfter(',', "") }.trim()
         val displayName = cleanDisplayName(rawName)
         if (displayName.isBlank() || streamUrl.isBlank()) return
@@ -490,6 +487,40 @@ class PlaylistRepository(private val context: Context) {
         .trim()
         .replace(Regex("^[\\\"']+|[\\\"']+$"), "")
         .replace(Regex("\\s{2,}"), " ")
+
+    private fun parseAttributesFast(info: String): Map<String, String> {
+        val result = HashMap<String, String>(16)
+        var index = 0
+        while (index < info.length) {
+            while (index < info.length && (info[index].isWhitespace() || info[index] == ',' || info[index] == '#' || info[index] == ':')) index++
+            val keyStart = index
+            while (index < info.length && (info[index].isLetterOrDigit() || info[index] == '-' || info[index] == '_')) index++
+            if (index == keyStart) {
+                index++
+                continue
+            }
+            val key = info.substring(keyStart, index).lowercase()
+            while (index < info.length && info[index].isWhitespace()) index++
+            if (index >= info.length || info[index] != '=') continue
+            index++
+            while (index < info.length && info[index].isWhitespace()) index++
+            if (index >= info.length) break
+            val value = if (info[index] == '\"' || info[index] == '\'') {
+                val quote = info[index++]
+                val valueStart = index
+                while (index < info.length && info[index] != quote) index++
+                val parsed = info.substring(valueStart, index)
+                if (index < info.length) index++
+                parsed
+            } else {
+                val valueStart = index
+                while (index < info.length && !info[index].isWhitespace() && info[index] != ',') index++
+                info.substring(valueStart, index)
+            }
+            if (value.isNotBlank()) result[key] = value.trim()
+        }
+        return result
+    }
 
     private fun firstAttribute(attributes: Map<String, String>, vararg keys: String): String {
         keys.forEach { key -> attributes[key.lowercase()]?.trim()?.takeIf { it.isNotBlank() }?.let { return it } }
