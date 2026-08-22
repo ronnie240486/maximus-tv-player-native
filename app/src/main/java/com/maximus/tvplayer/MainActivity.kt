@@ -1,10 +1,13 @@
 package com.maximus.tvplayer
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.speech.RecognizerIntent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -104,6 +107,7 @@ class MainActivity : Activity() {
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
+    private val radioRepository by lazy { RadioRepository(this) }
     private val imageLoader = ImageLoader()
     private val epgRepository = EpgRepository()
     private var epgByChannel: Map<String, List<EpgProgram>> = emptyMap()
@@ -125,6 +129,11 @@ class MainActivity : Activity() {
     private var sortAlphabetically = false
     private var remoteBannerUrl = ""
     private var remoteEpgUrl = ""
+    private var radioMode = false
+    private var voiceMode = false
+    private var radioDialog: Dialog? = null
+    private var remoteConfig: RemoteAppConfig? = null
+    private var radioEntries: List<CatalogEntry> = emptyList()
 
     private val editorials = mapOf(
         "animal planet" to ChannelEditorial(
@@ -327,6 +336,8 @@ class MainActivity : Activity() {
             Triple("FILMES", R.drawable.nav_movies_3d, "Filmes"),
             Triple("SÉRIES", R.drawable.nav_series_3d, "Séries"),
             Triple("FAVORITOS", R.drawable.nav_favorites_3d, "Favoritos"),
+            Triple("RÁDIOS", R.drawable.nav_radio_3d, "Rádios"),
+            Triple("VOZ", R.drawable.nav_voice_3d, "Voz"),
             Triple("AJUSTES", R.drawable.nav_settings_3d, "Ajustes"),
         )
         items.forEachIndexed { index, (label, iconRes, captionText) ->
@@ -349,6 +360,8 @@ class MainActivity : Activity() {
                         "FILMES" -> switchSection(MediaKind.MOVIE)
                         "SÉRIES" -> switchSection(MediaKind.SERIES)
                         "FAVORITOS" -> switchFavorites()
+                        "RÁDIOS" -> showRadioDialog()
+                        "VOZ" -> startVoiceCommand()
                         "AJUSTES" -> showSettingsDialog()
                     }
                 }
@@ -396,6 +409,8 @@ class MainActivity : Activity() {
     private fun isNavigationSelected(label: String): Boolean = when {
         homeMode -> label == "INÍCIO"
         favoritesOnly -> label == "FAVORITOS"
+        radioMode -> label == "RÁDIOS"
+        voiceMode -> label == "VOZ"
         currentKind == MediaKind.LIVE -> label == "CANAIS"
         currentKind == MediaKind.MOVIE -> label == "FILMES"
         else -> label == "SÉRIES"
@@ -404,6 +419,9 @@ class MainActivity : Activity() {
     private fun showHome() {
         homeMode = true
         favoritesOnly = false
+        radioMode = false
+        voiceMode = false
+        radioDialog?.dismiss()
         homePanel.visibility = View.VISIBLE
         findViewById<View>(R.id.sideNavigation).visibility = View.GONE
         findViewById<View>(R.id.channelColumn).visibility = View.GONE
@@ -455,6 +473,9 @@ class MainActivity : Activity() {
     }
 
     private fun switchSection(kind: MediaKind) {
+        radioMode = false
+        voiceMode = false
+        radioDialog?.dismiss()
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
         stopMiniPlayer()
@@ -495,6 +516,9 @@ class MainActivity : Activity() {
     }
 
     private fun switchFavorites() {
+        radioMode = false
+        voiceMode = false
+        radioDialog?.dismiss()
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
         stopMiniPlayer()
@@ -521,6 +545,10 @@ class MainActivity : Activity() {
     }
 
     private fun renderCategories() {
+        if (radioMode) {
+            renderCategoryButtons(listOf("Todos") + radioEntries.map { it.groupTitle }.distinct().sorted())
+            return
+        }
         if (databaseBackedCatalog) {
             val requestKind = currentKind
             val requestId = ++categoryRequestId
@@ -569,7 +597,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderCatalog() {
-        if (!databaseBackedCatalog) {
+        if (radioMode || !databaseBackedCatalog) {
             catalogAdapter.submit(visibleItems(), selectedEntry?.key)
             return
         }
@@ -621,6 +649,10 @@ class MainActivity : Activity() {
     }
 
     private fun currentItems(): List<CatalogEntry> {
+        if (radioMode) {
+            if (selectedCategory == "Todos") return radioEntries
+            return radioEntries.filter { it.groupTitle.ifBlank { "Rádios" } == selectedCategory }
+        }
         if (favoritesOnly) return catalog.entries.filter { it.key in favorites() && !isHidden(it.groupTitle) }
         return catalog.entries.filter { it.kind == currentKind && !isHidden(it.groupTitle) }
     }
@@ -640,6 +672,10 @@ class MainActivity : Activity() {
     }
 
     private fun selectFirstVisible() {
+        if (radioMode) {
+            visibleItems().firstOrNull()?.let { selectEntry(it, false) }
+            return
+        }
         if (databaseBackedCatalog) {
             val requestId = pageRequestId
             repository.queryPage(
@@ -718,7 +754,8 @@ class MainActivity : Activity() {
         playerView.player = player
         player.setMediaItem(MediaItem.fromUri(sourceUrl))
         player.prepare()
-        player.playWhenReady = true
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        player.playWhenReady = prefs.getBoolean(PREF_AUTOPLAY, true)
         miniPlayer = player
         miniPlayerView = playerView
         miniPlayerEntryKey = entry.key
@@ -767,7 +804,7 @@ class MainActivity : Activity() {
                 super.onPageFinished(view, url)
                 if (view == null || url?.contains("youtube", true) != true) return
                 if (resolved) {
-                    view.postDelayed({ enableYoutubeAudio(view) }, 1_200L)
+                    if (trailerAudioEnabled()) view.postDelayed({ enableYoutubeAudio(view) }, 1_200L)
                 } else {
                     view.postDelayed({ resolveFirstResult(view, 0) }, 1_200L)
                 }
@@ -870,7 +907,7 @@ class MainActivity : Activity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                if (view != null && url?.contains("youtube", true) == true) view.postDelayed({ enableYoutubeAudio(view) }, 1_000L)
+                if (view != null && url?.contains("youtube", true) == true && trailerAudioEnabled()) view.postDelayed({ enableYoutubeAudio(view) }, 1_000L)
             }
         }
         loadYoutubeVideoPage(webView, videoId)
@@ -1351,6 +1388,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyRemoteConfig(config: RemoteAppConfig) {
+        remoteConfig = config
         brandMark.text = "EXCELLENCE"
         brandSubtitle.text = "TV PLAYER"
         appLogo.setImageResource(R.drawable.excellence_logo)
@@ -1526,24 +1564,259 @@ class MainActivity : Activity() {
     }
 
     private fun showSettingsDialog() {
-        val message = "Catálogo recebido do painel pelo MAC.\\n\\n${catalog.totalCount} itens disponíveis em ${catalog.groupCount} grupos."
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        val config = remoteConfig
+        val mac = prefs.getString(PREF_MAC_ADDRESS, "").orEmpty()
+        val status = config?.status?.ifBlank { "conectado" } ?: "aguardando painel"
+        val message = buildString {
+            append("MAC: ").append(mac.ifBlank { "não informado" })
+            append("\\nStatus: ").append(status)
+            append("\\n\\nCatálogo: ").append(catalog.totalCount).append(" itens em ").append(catalog.groupCount).append(" grupos.")
+        }
+        val options = arrayOf(
+            "Áudio e reprodução",
+            "Comando de voz",
+            "Rádio",
+            "EPG e programação",
+            "DNS do painel",
+            "Playlists e cache",
+            "Categorias ocultas e ordem",
+            "Testar API do servidor",
+            "Verificar atualização",
+            "Sobre o Excellence",
+        )
         AlertDialog.Builder(this)
-            .setTitle("Ajustes do Excellence")
+            .setTitle("Configurações do Excellence")
             .setMessage(message)
-            .setItems(arrayOf("Categorias ocultas e ordem", "Recarregar catálogo do painel", "Testar API do Servidor", "Limpar cache local")) { _, which ->
+            .setItems(options) { _, which ->
                 when (which) {
-                    0 -> showCatalogRulesDialog()
-                    1 -> loadRemoteConfiguration()
-                    2 -> showServerTestDialog()
-                    3 -> {
-                        repository.clearCache()
-                        Toast.makeText(this, "Cache local limpo; a próxima consulta virá do painel", Toast.LENGTH_SHORT).show()
-                        loadRemoteConfiguration()
-                    }
+                    0 -> showPlaybackSettingsDialog()
+                    1 -> startVoiceCommand()
+                    2 -> showRadioDialog()
+                    3 -> showEpgSettingsDialog()
+                    4 -> showDnsDialog()
+                    5 -> showPlaylistSettingsDialog()
+                    6 -> showCatalogRulesDialog()
+                    7 -> showServerTestDialog()
+                    8 -> checkForAppUpdate()
+                    9 -> showAboutDialog()
                 }
             }
             .setNegativeButton("Fechar", null)
             .show()
+    }
+
+    private fun showPlaybackSettingsDialog() {
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        val audio = CheckBox(this).apply {
+            text = "Tentar áudio automático em trailers"
+            isChecked = prefs.getBoolean(PREF_TRAILER_AUDIO, true)
+        }
+        val autoplay = CheckBox(this).apply {
+            text = "Iniciar conteúdo automaticamente"
+            isChecked = prefs.getBoolean(PREF_AUTOPLAY, true)
+        }
+        val keepScreen = CheckBox(this).apply {
+            text = "Manter a tela ligada durante a reprodução"
+            isChecked = prefs.getBoolean(PREF_KEEP_SCREEN, true)
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(4), dp(24), 0)
+            addView(audio)
+            addView(autoplay)
+            addView(keepScreen)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Áudio e reprodução")
+            .setView(content)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salvar") { _, _ ->
+                prefs.edit()
+                    .putBoolean(PREF_TRAILER_AUDIO, audio.isChecked)
+                    .putBoolean(PREF_AUTOPLAY, autoplay.isChecked)
+                    .putBoolean(PREF_KEEP_SCREEN, keepScreen.isChecked)
+                    .apply()
+                Toast.makeText(this, "Preferências de reprodução salvas", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun showEpgSettingsDialog() {
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        val enabled = CheckBox(this).apply {
+            text = "Mostrar Agora, A seguir e próximos programas"
+            isChecked = prefs.getBoolean(PREF_SHOW_EPG, true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("EPG e programação")
+            .setView(enabled)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salvar") { _, _ ->
+                prefs.edit().putBoolean(PREF_SHOW_EPG, enabled.isChecked).apply()
+                selectedEntry?.let { selectEntry(it, false) }
+            }
+            .show()
+    }
+
+    private fun showPlaylistSettingsDialog() {
+        val urls = remoteConfig?.playlistUrls.orEmpty()
+        val message = buildString {
+            append("Listas recebidas exclusivamente do painel pelo MAC.\\n\\n")
+            if (urls.isEmpty()) append("Nenhuma URL de playlist foi enviada pelo painel.")
+            else urls.forEachIndexed { index, url -> append("Lista ${index + 1}: ").append(maskUrl(url)).append('\n') }
+            append("\\nCache: ").append(if (catalog.databaseBacked) "SQLite paginado ativo" else "memória")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Playlists e cache")
+            .setMessage(message)
+            .setPositiveButton("Recarregar") { _, _ -> loadRemoteConfiguration() }
+            .setNeutralButton("Limpar cache") { _, _ ->
+                repository.clearCache()
+                loadRemoteConfiguration()
+            }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun showDnsDialog() {
+        Toast.makeText(this, "Carregando DNS disponíveis no painel...", Toast.LENGTH_SHORT).show()
+        appIntegration.fetchDnsList { result ->
+            runOnUiThread {
+                result.onSuccess { dnsList ->
+                    val options = dnsList.take(5).ifEmpty { listOf("DNS do painel não informado") }
+                    val current = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_SELECTED_DNS, "")
+                    var selected = options.indexOf(current).takeIf { it >= 0 } ?: 0
+                    AlertDialog.Builder(this)
+                        .setTitle("DNS do painel")
+                        .setSingleChoiceItems(options.toTypedArray(), selected) { _, which -> selected = which }
+                        .setPositiveButton("Aplicar") { _, _ ->
+                            val chosen = options.getOrNull(selected).orEmpty()
+                            if (chosen.startsWith("http", true)) {
+                                getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_SELECTED_DNS, chosen).apply()
+                                Toast.makeText(this, "DNS selecionado", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .setNegativeButton("Cancelar", null)
+                        .show()
+                }.onFailure { error ->
+                    Toast.makeText(this, "DNS indisponível: ${error.message ?: "erro de conexão"}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun checkForAppUpdate() {
+        val mac = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
+        if (mac.isBlank()) {
+            Toast.makeText(this, "MAC ainda não configurado", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "Verificando atualização...", Toast.LENGTH_SHORT).show()
+        appIntegration.checkUpdate(mac) { result ->
+            runOnUiThread {
+                result.onSuccess { update ->
+                    val message = if (update.available) "Nova versão disponível: ${update.version}\\n${update.url}" else "O Excellence já está atualizado."
+                    AlertDialog.Builder(this).setTitle("Atualização").setMessage(message).setPositiveButton("OK", null).show()
+                }.onFailure { Toast.makeText(this, "Não foi possível verificar agora", Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+
+    private fun showAboutDialog() {
+        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("1.0.0")
+        AlertDialog.Builder(this)
+            .setTitle("Sobre o Excellence")
+            .setMessage("Excellence TV Player\\nVersão $version\\n\\nPlayer IPTV nativo para Android TV e TV Box, com ativação por MAC, playlists M3U Plus, filmes, séries, rádio, EPG e comandos de voz.")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun maskUrl(url: String): String = url.replace(Regex("(username|password)=([^&]+)"), "$1=••••")
+
+    private fun trailerAudioEnabled(): Boolean = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_TRAILER_AUDIO, true)
+
+    private fun showRadioDialog() {
+        switchRadio()
+    }
+
+    private fun switchRadio() {
+        radioDialog?.dismiss()
+        radioMode = true
+        voiceMode = false
+        favoritesOnly = false
+        homeMode = false
+        seriesEpisodesDialog?.dismiss()
+        seriesSeasonsDialog?.dismiss()
+        stopMiniPlayer()
+        selectedEntry = null
+        currentKind = MediaKind.LIVE
+        selectedCategory = "Todos"
+        query = ""
+        radioEntries = radioRepository.allStations().map { station ->
+            CatalogEntry(
+                key = "radio:${station.id}",
+                name = station.name,
+                groupTitle = station.category.ifBlank { "Rádios" },
+                tvgId = station.id,
+                logoUrl = station.logoUrl,
+                streamUrl = station.streamUrl,
+                kind = MediaKind.LIVE,
+                quality = "RÁDIO",
+            )
+        }
+        homePanel.visibility = View.GONE
+        findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
+        findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
+        findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
+        vodSection.visibility = View.GONE
+        liveHeader.text = "◉  Rádios"
+        channelHeading.text = "RÁDIO ONLINE"
+        searchHint.text = "Buscar estação..."
+        renderNavigation()
+        renderCategories()
+        renderCatalog()
+        selectFirstVisible()
+    }
+
+    private fun startVoiceCommand() {
+        voiceMode = true
+        renderNavigation()
+        if (android.os.Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_VOICE_PERMISSION)
+            return
+        }
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Diga: abrir filmes, séries, canais, rádio ou buscar")
+        }
+        runCatching { startActivityForResult(intent, REQUEST_VOICE) }
+            .onFailure { Toast.makeText(this, "Reconhecimento de voz indisponível neste dispositivo", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun handleVoiceCommand(spoken: String) {
+        voiceMode = false
+        renderNavigation()
+        val command = spoken.trim().lowercase(Locale.ROOT)
+        when {
+            command.contains("rádio") || command.contains("radio") -> showRadioDialog()
+            command.contains("filme") -> switchSection(MediaKind.MOVIE)
+            command.contains("série") || command.contains("serie") -> switchSection(MediaKind.SERIES)
+            command.contains("canal") -> switchSection(MediaKind.LIVE)
+            command.contains("favorito") -> switchFavorites()
+            command.contains("início") || command.contains("inicio") || command.contains("home") -> showHome()
+            command.contains("buscar") || command.contains("pesquisar") -> showSearchDialog()
+            else -> {
+                query = spoken.trim()
+                searchHint.text = if (query.isBlank()) searchPlaceholder() else query
+                if (radioMode) showRadioDialog() else {
+                    renderCatalog()
+                    selectFirstVisible()
+                }
+            }
+        }
+        Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show()
     }
 
     private fun showCatalogRulesDialog() {
@@ -1777,6 +2050,26 @@ class MainActivity : Activity() {
         cornerRadius = radius
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_VOICE) return
+        voiceMode = false
+        renderNavigation()
+        if (resultCode != RESULT_OK) return
+        val spoken = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull().orEmpty()
+        if (spoken.isNotBlank()) handleVoiceCommand(spoken)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_VOICE_PERMISSION && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) startVoiceCommand()
+        else if (requestCode == REQUEST_VOICE_PERMISSION) {
+            voiceMode = false
+            renderNavigation()
+            Toast.makeText(this, "Permissão de microfone recusada", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onDestroy() {
         stopMiniPlayer()
         repository.shutdown()
@@ -1794,5 +2087,12 @@ class MainActivity : Activity() {
         private const val PREF_SERVER_API_URL = "server_api_url"
         private const val PREF_TEST_API_URL = "test_api_url"
         private const val PREF_LAST_MESSAGE_KEY = "last_remote_message_key"
+        private const val PREF_TRAILER_AUDIO = "trailer_audio_enabled"
+        private const val PREF_AUTOPLAY = "autoplay_enabled"
+        private const val PREF_KEEP_SCREEN = "keep_screen_on"
+        private const val PREF_SHOW_EPG = "show_epg"
+        private const val PREF_SELECTED_DNS = "selected_dns"
+        private const val REQUEST_VOICE = 7101
+        private const val REQUEST_VOICE_PERMISSION = 7102
     }
 }
