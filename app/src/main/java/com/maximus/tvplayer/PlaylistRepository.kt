@@ -102,8 +102,8 @@ class PlaylistRepository(private val context: Context) {
         }
     }
 
-    fun queryGroups(kind: MediaKind, hidden: Set<String>, callback: (List<String>) -> Unit) {
-        executor.execute { callback(runCatching { database.groups(kind, hidden) }.getOrDefault(emptyList())) }
+    fun queryGroups(kind: MediaKind, hidden: Set<String>, includeAdult: Boolean = false, callback: (List<String>) -> Unit) {
+        executor.execute { callback(runCatching { database.groups(kind, hidden, includeAdult) }.getOrDefault(emptyList())) }
     }
 
     fun queryPage(
@@ -116,19 +116,20 @@ class PlaylistRepository(private val context: Context) {
         limit: Int,
         offset: Int,
         seriesOnly: Boolean = false,
+        includeAdult: Boolean = false,
         callback: (List<CatalogEntry>) -> Unit,
     ) {
         executor.execute {
-            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset, seriesOnly) }.getOrDefault(emptyList()))
+            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset, seriesOnly, includeAdult) }.getOrDefault(emptyList()))
         }
     }
 
-    fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>, callback: (List<String>) -> Unit) {
-        executor.execute { callback(runCatching { database.querySeriesSeasons(seriesGroup, group, hidden) }.getOrDefault(emptyList())) }
+    fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>, includeAdult: Boolean = false, callback: (List<String>) -> Unit) {
+        executor.execute { callback(runCatching { database.querySeriesSeasons(seriesGroup, group, hidden, includeAdult) }.getOrDefault(emptyList())) }
     }
 
-    fun querySeriesEpisodes(seriesGroup: String, season: String, group: String, hidden: Set<String>, callback: (List<CatalogEntry>) -> Unit) {
-        executor.execute { callback(runCatching { database.querySeriesEpisodes(seriesGroup, season, group, hidden) }.getOrDefault(emptyList())) }
+    fun querySeriesEpisodes(seriesGroup: String, season: String, group: String, hidden: Set<String>, includeAdult: Boolean = false, callback: (List<CatalogEntry>) -> Unit) {
+        executor.execute { callback(runCatching { database.querySeriesEpisodes(seriesGroup, season, group, hidden, includeAdult) }.getOrDefault(emptyList())) }
     }
 
     fun enrichMetadata(entry: CatalogEntry, callback: (CatalogMetadata?) -> Unit) {

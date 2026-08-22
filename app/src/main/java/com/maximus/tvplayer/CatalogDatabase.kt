@@ -49,8 +49,8 @@ class CatalogDatabase(context: Context) {
             db.delete(TABLE, null, null)
             val statement = db.compileStatement(
                 "INSERT OR IGNORE INTO $TABLE " +
-                    "(item_key,name,group_title,tvg_id,logo_url,stream_url,kind,quality,series_group,season,episode,year,synopsis,cast,backdrop_url,trailer_url,runtime) " +
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                    "(item_key,name,group_title,tvg_id,logo_url,stream_url,kind,quality,series_group,season,episode,year,synopsis,cast,backdrop_url,trailer_url,runtime,is_adult) " +
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             )
             feed { entry ->
                 statement.clearBindings()
@@ -102,16 +102,23 @@ class CatalogDatabase(context: Context) {
         return aggregateStats(helper.readableDatabase)
     }
 
-    fun groups(kind: MediaKind, hidden: Set<String>): List<String> {
+    fun groups(kind: MediaKind, hidden: Set<String>, includeAdult: Boolean = false): List<String> {
         val db = helper.readableDatabase
         val args = mutableListOf(kind.name)
         val hiddenClause = hiddenClause(hidden, args)
-        val sql = "SELECT DISTINCT group_title FROM $TABLE WHERE kind=? $hiddenClause ORDER BY group_title COLLATE NOCASE"
-        return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
+        val sql = "SELECT DISTINCT group_title FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause ORDER BY group_title COLLATE NOCASE"
+        val groups = db.rawQuery(sql, args.toTypedArray()).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) add(cursor.getString(0).orEmpty().ifBlank { "Sem categoria" })
             }
+        }.toMutableList()
+        if (includeAdult) {
+            val adultArgs = mutableListOf(kind.name)
+            val adultHiddenClause = hiddenClause(hidden, adultArgs)
+            val hasAdult = db.rawQuery("SELECT 1 FROM $TABLE WHERE kind=? AND is_adult=1 $adultHiddenClause LIMIT 1", adultArgs.toTypedArray()).use { it.moveToFirst() }
+            if (hasAdult) groups += ContentSafety.LOCKED_CATEGORY
         }
+        return groups
     }
 
     fun queryPage(
@@ -124,14 +131,19 @@ class CatalogDatabase(context: Context) {
         limit: Int,
         offset: Int,
         seriesOnly: Boolean = false,
+        includeAdult: Boolean = false,
     ): List<CatalogEntry> {
-        if (seriesOnly) return querySeriesPage(group, search, hidden, sortAlphabetically, limit, offset)
+        if (seriesOnly) return querySeriesPage(group, search, hidden, sortAlphabetically, limit, offset, includeAdult)
         if (kind == null && favorites.isEmpty()) return emptyList()
         val db = helper.readableDatabase
         val where = mutableListOf<String>()
         val args = mutableListOf<String>()
         kind?.let { where += "kind=?"; args += it.name }
-        if (group != "Todos") { where += "group_title=?"; args += group }
+        when {
+            group == ContentSafety.LOCKED_CATEGORY -> where += if (includeAdult) "is_adult=1" else "0"
+            group != "Todos" -> { where += "group_title=? AND is_adult=0"; args += group }
+            !includeAdult -> where += "is_adult=0"
+        }
         if (search.isNotBlank()) {
             where += "(LOWER(name) LIKE ? OR LOWER(group_title) LIKE ? OR LOWER(tvg_id) LIKE ?)"
             val value = "%${search.trim().lowercase()}%"
@@ -140,7 +152,7 @@ class CatalogDatabase(context: Context) {
         if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
         if (favorites.isNotEmpty()) where += "item_key IN (${favorites.joinToString(",") { "?" }})".also { args.addAll(favorites) }
         val selection = if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
-        val order = if (sortAlphabetically) "name COLLATE NOCASE ASC" else "rowid ASC"
+        val order = if (sortAlphabetically) "is_adult ASC, name COLLATE NOCASE ASC" else "is_adult ASC, rowid ASC"
         val sql = "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
             buildList {
@@ -149,11 +161,11 @@ class CatalogDatabase(context: Context) {
         }
     }
 
-    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
+    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int, includeAdult: Boolean): List<CatalogEntry> {
         val db = helper.readableDatabase
-        val (sourceFilter, sourceArgs) = seriesFilter("source", group, search, hidden)
+        val (sourceFilter, sourceArgs) = seriesFilter("source", group, search, hidden, includeAdult)
         val sourceIdentity = "LOWER(TRIM(CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END))"
-        val cardOrder = if (sortAlphabetically) "card.name COLLATE NOCASE ASC" else "card.rowid ASC"
+        val cardOrder = if (sortAlphabetically) "card.is_adult ASC, card.name COLLATE NOCASE ASC" else "card.is_adult ASC, card.rowid ASC"
         val sql = "SELECT card.* FROM $TABLE card INNER JOIN (" +
             "SELECT MIN(source.rowid) AS first_rowid FROM $TABLE source WHERE $sourceFilter GROUP BY $sourceIdentity" +
             ") roots ON card.rowid = roots.first_rowid ORDER BY $cardOrder LIMIT $limit OFFSET $offset"
@@ -165,13 +177,17 @@ class CatalogDatabase(context: Context) {
             }
         }.getOrDefault(emptyList())
         if (grouped.isNotEmpty()) return grouped
-        return queryPage(MediaKind.SERIES, group, search, hidden, emptySet(), sortAlphabetically, limit, offset, false)
+        return queryPage(MediaKind.SERIES, group, search, hidden, emptySet(), sortAlphabetically, limit, offset, false, includeAdult)
     }
 
-    private fun seriesFilter(alias: String, group: String, search: String, hidden: Set<String>): Pair<String, List<String>> {
+    private fun seriesFilter(alias: String, group: String, search: String, hidden: Set<String>, includeAdult: Boolean): Pair<String, List<String>> {
         val where = mutableListOf("$alias.kind=?")
         val args = mutableListOf(MediaKind.SERIES.name)
-        if (group != "Todos") { where += "$alias.group_title=?"; args += group }
+        when {
+            group == ContentSafety.LOCKED_CATEGORY -> where += if (includeAdult) "$alias.is_adult=1" else "0"
+            group != "Todos" -> { where += "$alias.group_title=? AND $alias.is_adult=0"; args += group }
+            !includeAdult -> where += "$alias.is_adult=0"
+        }
         if (search.isNotBlank()) {
             where += "(LOWER($alias.name) LIKE ? OR LOWER($alias.group_title) LIKE ? OR LOWER($alias.tvg_id) LIKE ? OR LOWER($alias.series_group) LIKE ?)"
             val value = "%${search.trim().lowercase()}%"
@@ -184,11 +200,15 @@ class CatalogDatabase(context: Context) {
     fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =
         queryPage(kind, group, search, hidden, favorites, sortAlphabetically, 1, 0).firstOrNull()
 
-    fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>): List<String> {
+    fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>, includeAdult: Boolean = false): List<String> {
         val db = helper.readableDatabase
         val where = mutableListOf("kind=?", "series_group=?")
         val args = mutableListOf(MediaKind.SERIES.name, seriesGroup)
-        if (group != "Todos") { where += "group_title=?"; args += group }
+        when {
+            group == ContentSafety.LOCKED_CATEGORY -> where += if (includeAdult) "is_adult=1" else "0"
+            group != "Todos" -> { where += "group_title=? AND is_adult=0"; args += group }
+            !includeAdult -> where += "is_adult=0"
+        }
         if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
         val seasonExpr = "CASE WHEN TRIM(season) = '' THEN '1' ELSE season END"
         val sql = "SELECT DISTINCT $seasonExpr AS season_value FROM $TABLE WHERE ${where.joinToString(" AND ")} ORDER BY CAST($seasonExpr AS INTEGER), season_value"
@@ -199,14 +219,18 @@ class CatalogDatabase(context: Context) {
         }
     }
 
-    fun querySeriesEpisodes(seriesGroup: String, season: String, group: String, hidden: Set<String>): List<CatalogEntry> {
+    fun querySeriesEpisodes(seriesGroup: String, season: String, group: String, hidden: Set<String>, includeAdult: Boolean = false): List<CatalogEntry> {
         val db = helper.readableDatabase
         val where = mutableListOf("kind=?", "series_group=?")
         val args = mutableListOf(MediaKind.SERIES.name, seriesGroup)
         val seasonExpr = "CASE WHEN TRIM(season) = '' THEN '1' ELSE season END"
         where += "$seasonExpr=?"
         args += season
-        if (group != "Todos") { where += "group_title=?"; args += group }
+        when {
+            group == ContentSafety.LOCKED_CATEGORY -> where += if (includeAdult) "is_adult=1" else "0"
+            group != "Todos" -> { where += "group_title=? AND is_adult=0"; args += group }
+            !includeAdult -> where += "is_adult=0"
+        }
         if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
         val sql = "SELECT * FROM $TABLE WHERE ${where.joinToString(" AND ")} ORDER BY CAST(NULLIF(episode, '') AS INTEGER), name COLLATE NOCASE"
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
@@ -265,6 +289,7 @@ class CatalogDatabase(context: Context) {
         statement.bindString(15, e.backdropUrl)
         statement.bindString(16, e.trailerUrl)
         statement.bindString(17, e.runtime)
+        statement.bindLong(18, if (ContentSafety.isAdult(e)) 1L else 0L)
     }
 
     private fun readEntry(c: android.database.Cursor): CatalogEntry = CatalogEntry(
@@ -287,15 +312,24 @@ class CatalogDatabase(context: Context) {
         runtime = c.getString(c.getColumnIndexOrThrow("runtime")),
     )
 
-    private class Helper(context: Context) : SQLiteOpenHelper(context, "excellence_catalog.db", null, 2) {
+    private class Helper(context: Context) : SQLiteOpenHelper(context, "excellence_catalog.db", null, 3) {
         override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE $TABLE (item_key TEXT PRIMARY KEY, name TEXT NOT NULL, group_title TEXT NOT NULL, tvg_id TEXT, logo_url TEXT, stream_url TEXT NOT NULL, kind TEXT NOT NULL, quality TEXT, series_group TEXT, season TEXT, episode TEXT, year TEXT, synopsis TEXT, cast TEXT, backdrop_url TEXT, trailer_url TEXT, runtime TEXT)")
+            db.execSQL("CREATE TABLE $TABLE (item_key TEXT PRIMARY KEY, name TEXT NOT NULL, group_title TEXT NOT NULL, tvg_id TEXT, logo_url TEXT, stream_url TEXT NOT NULL, kind TEXT NOT NULL, quality TEXT, series_group TEXT, season TEXT, episode TEXT, year TEXT, synopsis TEXT, cast TEXT, backdrop_url TEXT, trailer_url TEXT, runtime TEXT, is_adult INTEGER NOT NULL DEFAULT 0)")
             db.execSQL("CREATE INDEX idx_catalog_kind_group ON $TABLE(kind, group_title)")
             db.execSQL("CREATE INDEX idx_catalog_name ON $TABLE(name COLLATE NOCASE)")
             db.execSQL("CREATE INDEX idx_catalog_series_season ON $TABLE(kind, series_group, season)")
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
             if (oldVersion < 2) db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_series_season ON $TABLE(kind, series_group, season)")
+            if (oldVersion < 3) {
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN is_adult INTEGER NOT NULL DEFAULT 0")
+                ContentSafety.migrationTerms().forEach { term ->
+                    db.execSQL(
+                        "UPDATE $TABLE SET is_adult=1 WHERE LOWER(group_title || ' ' || name) LIKE ?",
+                        arrayOf("%$term%"),
+                    )
+                }
+            }
         }
     }
 

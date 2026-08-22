@@ -25,6 +25,8 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -38,6 +40,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -139,6 +142,7 @@ class MainActivity : Activity() {
     private var remoteConfig: RemoteAppConfig? = null
     private var radioEntries: List<CatalogEntry> = emptyList()
     private var focusCatalogWhenReady = false
+    private var parentalUnlocked = false
     private var catalogImportInProgress = false
     private var catalogImportWatcherStarted = false
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -788,10 +792,12 @@ class MainActivity : Activity() {
             val cachedGroups = categoryCache[requestKind].orEmpty()
             categoryList.removeAllViews()
             renderCategoryButtons(listOf("Todos") + cachedGroups)
-            repository.queryGroups(requestKind, hiddenGroups()) { groups ->
+            repository.queryGroups(requestKind, hiddenGroups(), includeAdult = true) { groups ->
                 runOnUiThread {
                     if (!databaseBackedCatalog || currentKind != requestKind || requestId != categoryRequestId) return@runOnUiThread
-                    val freshGroups = groups.map { it.ifBlank { "Sem categoria" } }.distinct().sorted()
+                    val normalizedGroups = groups.map { it.ifBlank { "Sem categoria" } }.distinct()
+                    val freshGroups = normalizedGroups.filterNot { it == ContentSafety.LOCKED_CATEGORY }.sorted() +
+                        normalizedGroups.filter { it == ContentSafety.LOCKED_CATEGORY }
                     categoryCache[requestKind] = freshGroups
                     if (selectedCategory != "Todos" && selectedCategory !in freshGroups) selectedCategory = "Todos"
                     renderCategoryButtons(listOf("Todos") + freshGroups)
@@ -814,10 +820,17 @@ class MainActivity : Activity() {
                 setPadding(12, 7, 12, 7)
                 layoutParams = LinearLayout.LayoutParams(-2, -1).apply { setMargins(3, 0, 3, 0) }
                 setOnClickListener {
-                    selectedCategory = category
-                    renderCategories()
-                    renderCatalog()
-                    selectFirstVisible()
+                    val applyCategory = {
+                        selectedCategory = category
+                        renderCategories()
+                        renderCatalog()
+                        selectFirstVisible()
+                    }
+                    if (category == ContentSafety.LOCKED_CATEGORY && !parentalUnlocked) {
+                        requestAdultAccess(applyCategory)
+                    } else {
+                        applyCategory()
+                    }
                 }
                 setOnFocusChangeListener { view, hasFocus ->
                     if (hasFocus) view.background = rounded(0x334CE8F0, 18f)
@@ -857,6 +870,7 @@ class MainActivity : Activity() {
             limit = pageSize,
             offset = offset,
             seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
+            includeAdult = parentalUnlocked,
         ) { page ->
             runOnUiThread {
                 if (requestId != pageRequestId) return@runOnUiThread
@@ -887,16 +901,23 @@ class MainActivity : Activity() {
 
     private fun currentItems(): List<CatalogEntry> {
         if (radioMode) {
-            if (selectedCategory == "Todos") return radioEntries
-            return radioEntries.filter { it.groupTitle.ifBlank { "Rádios" } == selectedCategory }
+            val safeRadios = radioEntries.filter { parentalUnlocked || !ContentSafety.isAdult(it) }
+            if (selectedCategory == "Todos") return safeRadios
+            return safeRadios.filter { it.groupTitle.ifBlank { "Rádios" } == selectedCategory }
         }
-        if (favoritesOnly) return catalog.entries.filter { it.key in favorites() && !isHidden(it.groupTitle) }
-        return catalog.entries.filter { it.kind == currentKind && !isHidden(it.groupTitle) }
+        if (favoritesOnly) return catalog.entries.filter { it.key in favorites() && !isHidden(it.groupTitle) && (parentalUnlocked || !ContentSafety.isAdult(it)) }
+        return catalog.entries.filter { it.kind == currentKind && !isHidden(it.groupTitle) && (parentalUnlocked || !ContentSafety.isAdult(it)) }
     }
 
     private fun visibleItems(): List<CatalogEntry> {
         var result = currentItems()
-        if (selectedCategory != "Todos") result = result.filter { it.groupTitle.ifBlank { "Sem categoria" } == selectedCategory }
+        if (selectedCategory != "Todos") {
+            result = if (selectedCategory == ContentSafety.LOCKED_CATEGORY) {
+                result.filter { parentalUnlocked && ContentSafety.isAdult(it) }
+            } else {
+                result.filter { it.groupTitle.ifBlank { "Sem categoria" } == selectedCategory }
+            }
+        }
         if (query.isNotBlank()) {
             val normalized = query.trim().lowercase()
             result = result.filter { item ->
@@ -906,6 +927,103 @@ class MainActivity : Activity() {
             }
         }
         return if (sortAlphabetically) result.sortedBy { it.name.lowercase() } else result
+    }
+
+    private fun remoteSyncEnabled(): Boolean = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_REMOTE_SYNC, true)
+
+    private fun hasParentalPin(): Boolean = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        .getString(PREF_PARENTAL_PIN_HASH, "").orEmpty().isNotBlank()
+
+    private fun hashPin(pin: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(pin.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+    private fun requestAdultAccess(onGranted: () -> Unit) {
+        if (parentalUnlocked) {
+            onGranted()
+            return
+        }
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        val storedHash = prefs.getString(PREF_PARENTAL_PIN_HASH, "").orEmpty()
+        if (storedHash.isBlank()) {
+            showParentalPinEditor(onCreated = onGranted)
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "PIN de 4 dígitos"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Conteúdo protegido")
+            .setMessage("Digite o PIN parental para exibir esta categoria.")
+            .setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Desbloquear") { _, _ ->
+                if (hashPin(input.text.toString()) != storedHash) {
+                    Toast.makeText(this, "PIN parental incorreto", Toast.LENGTH_LONG).show()
+                } else {
+                    parentalUnlocked = true
+                    onGranted()
+                }
+            }
+            .show()
+    }
+
+    private fun showParentalPinEditor(onCreated: (() -> Unit)? = null) {
+        val input = EditText(this).apply {
+            hint = "Crie um PIN de 4 dígitos"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Configurar PIN parental")
+            .setMessage("O conteúdo adulto ficará na última categoria e só será exibido após este PIN. Não use 0000.")
+            .setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salvar PIN") { _, _ ->
+                val pin = input.text.toString()
+                if (!pin.matches(Regex("\\d{4}")) || pin == "0000") {
+                    Toast.makeText(this, "Use exatamente 4 números diferentes de 0000", Toast.LENGTH_LONG).show()
+                } else {
+                    getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit()
+                        .putString(PREF_PARENTAL_PIN_HASH, hashPin(pin))
+                        .apply()
+                    parentalUnlocked = true
+                    Toast.makeText(this, "PIN parental configurado", Toast.LENGTH_SHORT).show()
+                    onCreated?.invoke()
+                }
+            }
+            .show()
+    }
+
+    private fun showParentalControlDialog() {
+        val configured = hasParentalPin()
+        val state = if (configured) {
+            "PIN configurado. O conteúdo protegido permanece oculto até o desbloqueio."
+        } else {
+            "Nenhum PIN configurado. O conteúdo protegido continuará bloqueado até você criar um PIN."
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Controle parental")
+            .setMessage(state)
+            .setNegativeButton("Fechar", null)
+            .setNeutralButton(if (configured) "Bloquear agora" else "Criar PIN") { _, _ ->
+                if (configured) {
+                    parentalUnlocked = false
+                    selectedCategory = "Todos"
+                    categoryCache.clear()
+                    renderCategories()
+                    renderCatalog()
+                    Toast.makeText(this, "Conteúdo protegido bloqueado", Toast.LENGTH_SHORT).show()
+                } else {
+                    showParentalPinEditor()
+                }
+            }
+            .setPositiveButton(if (configured) "Alterar PIN" else "Configurar PIN") { _, _ ->
+                if (configured) requestAdultAccess { showParentalPinEditor() } else showParentalPinEditor()
+            }
+            .show()
     }
 
     private fun selectFirstVisible() {
@@ -925,6 +1043,7 @@ class MainActivity : Activity() {
                 limit = 1,
                 offset = 0,
                 seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
+                includeAdult = parentalUnlocked,
                 ) { page ->
                 runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
             }
@@ -934,6 +1053,10 @@ class MainActivity : Activity() {
     }
 
     private fun handleEntryClick(entry: CatalogEntry) {
+        if (ContentSafety.isAdult(entry) && !parentalUnlocked) {
+            requestAdultAccess { handleEntryClick(entry) }
+            return
+        }
         val sameEntry = miniPlayerEntryKey == entry.key
         if (isSeriesRootEntry(entry)) {
             if (sameEntry && previewMode == PreviewMode.TRAILER) {
@@ -1250,6 +1373,10 @@ class MainActivity : Activity() {
     }
 
     private fun selectEntry(entry: CatalogEntry, requestFocus: Boolean) {
+        if (ContentSafety.isAdult(entry) && !parentalUnlocked) {
+            if (requestFocus) requestAdultAccess { selectEntry(entry, true) }
+            return
+        }
         if (selectedEntry?.key != entry.key) stopMiniPlayer()
         selectedEntry = entry
         val editorial = editorialFor(entry)
@@ -1384,10 +1511,24 @@ class MainActivity : Activity() {
 
 
     private fun openEntry(entry: CatalogEntry) {
+        if (ContentSafety.isAdult(entry) && !parentalUnlocked) {
+            requestAdultAccess { openEntry(entry) }
+            return
+        }
         if (entry.streamUrl.isBlank()) {
             Toast.makeText(this, "Este item não possui URL válida na lista do painel", Toast.LENGTH_SHORT).show()
             loadRemoteConfiguration()
             return
+        }
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        if (prefs.getBoolean(PREF_EXTERNAL_PLAYER, false)) {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.parse(entry.streamUrl), "video/*")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }.onSuccess { return }
+                .onFailure { Toast.makeText(this, "Player externo indisponível; usando o player Excellence", Toast.LENGTH_SHORT).show() }
         }
         startActivity(Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_TITLE, entry.name)
@@ -1397,6 +1538,10 @@ class MainActivity : Activity() {
     }
 
     private fun showSeriesSeasonsDialog(entry: CatalogEntry) {
+        if (ContentSafety.isAdult(entry) && !parentalUnlocked) {
+            requestAdultAccess { showSeriesSeasonsDialog(entry) }
+            return
+        }
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
         val showTitle = seriesTitle(entry)
@@ -1422,7 +1567,7 @@ class MainActivity : Activity() {
             }
         }
         if (databaseBackedCatalog) {
-            repository.querySeriesSeasons(showTitle, selectedCategory, hiddenGroups()) { seasons -> runOnUiThread { render(seasons) } }
+            repository.querySeriesSeasons(showTitle, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { seasons -> runOnUiThread { render(seasons) } }
         } else {
             render(currentItems().filter { it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle }.map { it.season.ifBlank { "1" } }.distinct().sortedBy { it.toIntOrNull() ?: 1 })
         }
@@ -1455,7 +1600,7 @@ class MainActivity : Activity() {
             }
         }
         if (databaseBackedCatalog) {
-            repository.querySeriesEpisodes(showTitle, season, selectedCategory, hiddenGroups()) { episodes -> runOnUiThread { render(episodes) } }
+            repository.querySeriesEpisodes(showTitle, season, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { episodes -> runOnUiThread { render(episodes) } }
         } else {
             render(currentItems().filter {
                 it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle && (it.season.ifBlank { "1" } == season)
@@ -1650,7 +1795,7 @@ class MainActivity : Activity() {
                     }
                     applyRemoteConfig(config, catalogImportAlreadyStarted)
                     if (catalogImportAlreadyStarted) startCatalogImportWatcher()
-                    appIntegration.startBackgroundSync(
+                    if (remoteSyncEnabled()) appIntegration.startBackgroundSync(
                         mac = mac,
                         currentContent = { selectedEntry?.name },
                         onNotifications = { notifications -> showRemoteNotifications(mac, notifications) },
@@ -1773,7 +1918,7 @@ class MainActivity : Activity() {
     private fun renderVodStrip() {
         vodCards.removeAllViews()
         if (!databaseBackedCatalog) return
-        repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortAlphabetically, 4, 0) { movies ->
+        repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortAlphabetically, 4, 0, includeAdult = parentalUnlocked) { movies ->
             runOnUiThread {
                 movies.forEach { movie ->
                     val card = TextView(this).apply {
@@ -1893,34 +2038,43 @@ class MainActivity : Activity() {
             append("MAC: ").append(mac.ifBlank { "não informado" })
             append("\\nStatus: ").append(status)
             append("\\n\\nCatálogo: ").append(catalog.totalCount).append(" itens em ").append(catalog.groupCount).append(" grupos.")
+            append("\\nControle parental: ").append(if (hasParentalPin()) "PIN configurado" else "não configurado")
         }
         val options = arrayOf(
+            "Controle parental (PIN)",
             "Áudio e reprodução",
+            "Legendas e idioma",
             "Comando de voz",
             "Rádio",
             "EPG e programação",
             "DNS do painel",
             "Playlists e cache",
             "Categorias ocultas e ordem",
+            "Sincronização e notificações",
             "Testar API do servidor",
             "Verificar atualização",
             "Sobre o Excellence",
+            "Sair do aplicativo",
         )
         AlertDialog.Builder(this)
             .setTitle("Configurações do Excellence")
             .setMessage(message)
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> showPlaybackSettingsDialog()
-                    1 -> startVoiceCommand()
-                    2 -> showRadioDialog()
-                    3 -> showEpgSettingsDialog()
-                    4 -> showDnsDialog()
-                    5 -> showPlaylistSettingsDialog()
-                    6 -> showCatalogRulesDialog()
-                    7 -> showServerTestDialog()
-                    8 -> checkForAppUpdate()
-                    9 -> showAboutDialog()
+                    0 -> showParentalControlDialog()
+                    1 -> showPlaybackSettingsDialog()
+                    2 -> showSubtitleLanguageDialog()
+                    3 -> startVoiceCommand()
+                    4 -> showRadioDialog()
+                    5 -> showEpgSettingsDialog()
+                    6 -> showDnsDialog()
+                    7 -> showPlaylistSettingsDialog()
+                    8 -> showCatalogRulesDialog()
+                    9 -> showSyncSettingsDialog()
+                    10 -> showServerTestDialog()
+                    11 -> checkForAppUpdate()
+                    12 -> showAboutDialog()
+                    13 -> showExitConfirmation()
                 }
             }
             .setNegativeButton("Fechar", null)
@@ -1941,12 +2095,17 @@ class MainActivity : Activity() {
             text = "Manter a tela ligada durante a reprodução"
             isChecked = prefs.getBoolean(PREF_KEEP_SCREEN, true)
         }
+        val externalPlayer = CheckBox(this).apply {
+            text = "Permitir abrir conteúdo em player externo"
+            isChecked = prefs.getBoolean(PREF_EXTERNAL_PLAYER, false)
+        }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(4), dp(24), 0)
             addView(audio)
             addView(autoplay)
             addView(keepScreen)
+            addView(externalPlayer)
         }
         AlertDialog.Builder(this)
             .setTitle("Áudio e reprodução")
@@ -1957,8 +2116,83 @@ class MainActivity : Activity() {
                     .putBoolean(PREF_TRAILER_AUDIO, audio.isChecked)
                     .putBoolean(PREF_AUTOPLAY, autoplay.isChecked)
                     .putBoolean(PREF_KEEP_SCREEN, keepScreen.isChecked)
+                    .putBoolean(PREF_EXTERNAL_PLAYER, externalPlayer.isChecked)
                     .apply()
                 Toast.makeText(this, "Preferências de reprodução salvas", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun showSubtitleLanguageDialog() {
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        val enabled = CheckBox(this).apply {
+            text = "Ativar legendas quando a transmissão fornecer legenda"
+            isChecked = prefs.getBoolean(PREF_SUBTITLE_ENABLE, false)
+        }
+        val languageLabel = TextView(this).apply {
+            text = "Idioma preferido"
+            setTextColor(Color.WHITE)
+            setPadding(0, dp(12), 0, dp(6))
+        }
+        val languages = listOf("Português (Brasil)" to "pt-BR", "English" to "en", "Español" to "es")
+        val languageGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+        }
+        val selectedLanguage = prefs.getString(PREF_LANGUAGE_CODE, "pt-BR")
+        languages.forEach { (label, code) ->
+            languageGroup.addView(RadioButton(this).apply {
+                text = label
+                tag = code
+                isChecked = code == selectedLanguage
+                isFocusable = true
+            })
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(4), dp(24), 0)
+            addView(enabled)
+            addView(languageLabel)
+            addView(languageGroup)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Legendas e idioma")
+            .setView(content)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salvar") { _, _ ->
+                val selected = languageGroup.findViewById<RadioButton>(languageGroup.checkedRadioButtonId)
+                prefs.edit()
+                    .putBoolean(PREF_SUBTITLE_ENABLE, enabled.isChecked)
+                    .putString(PREF_LANGUAGE_CODE, selected?.tag?.toString() ?: "pt-BR")
+                    .apply()
+                Toast.makeText(this, "Preferências de idioma salvas", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun showSyncSettingsDialog() {
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        val enabled = CheckBox(this).apply {
+            text = "Permitir sincronização automática, alertas e comandos do painel"
+            isChecked = remoteSyncEnabled()
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(4), dp(24), 0)
+            addView(enabled)
+            addView(TextView(this@MainActivity).apply {
+                text = "A lista M3U continua sendo recebida exclusivamente pelo painel e pelo MAC deste dispositivo."
+                setTextColor(Color.rgb(170, 177, 199))
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Sincronização e notificações")
+            .setView(content)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Salvar") { _, _ ->
+                prefs.edit().putBoolean(PREF_REMOTE_SYNC, enabled.isChecked).apply()
+                Toast.makeText(this, "Preferência de sincronização salva", Toast.LENGTH_SHORT).show()
+                loadRemoteConfiguration()
             }
             .show()
     }
@@ -1985,18 +2219,51 @@ class MainActivity : Activity() {
         val message = buildString {
             append("Listas recebidas exclusivamente do painel pelo MAC.\\n\\n")
             if (urls.isEmpty()) append("Nenhuma URL de playlist foi enviada pelo painel.")
-            else urls.forEachIndexed { index, url -> append("Lista ${index + 1}: ").append(maskUrl(url)).append('\n') }
+            else append("Selecione a playlist ativa abaixo. As demais permanecem como failover.\\n")
             append("\\nCache: ").append(if (catalog.databaseBacked) "SQLite paginado ativo" else "memória")
         }
-        AlertDialog.Builder(this)
+        var selected = 0
+        val builder = AlertDialog.Builder(this)
             .setTitle("Playlists e cache")
             .setMessage(message)
-            .setPositiveButton("Recarregar") { _, _ -> loadRemoteConfiguration() }
+        if (urls.size > 1) {
+            builder.setSingleChoiceItems(
+                urls.mapIndexed { index, url -> "Lista ${index + 1}  •  ${maskUrl(url)}" }.toTypedArray(),
+                0,
+            ) { _, which -> selected = which }
+        }
+        builder
+            .setPositiveButton(if (urls.size > 1) "Aplicar" else "Recarregar") { _, _ ->
+                if (urls.size > 1) loadSelectedPlaylist(urls[selected]) else loadRemoteConfiguration()
+            }
             .setNeutralButton("Limpar cache") { _, _ ->
                 repository.clearCache()
                 loadRemoteConfiguration()
             }
             .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun loadSelectedPlaylist(url: String) {
+        Toast.makeText(this, "Carregando playlist selecionada...", Toast.LENGTH_SHORT).show()
+        repository.load(listOf(url)) { result ->
+            runOnUiThread {
+                result.onSuccess { snapshot ->
+                    remoteConfig?.let { applyCatalogSnapshot(snapshot, it.copy(playlistUrls = listOf(url))) }
+                    Toast.makeText(this, "Playlist ativa atualizada", Toast.LENGTH_SHORT).show()
+                }.onFailure {
+                    Toast.makeText(this, "Não foi possível carregar a playlist selecionada", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun showExitConfirmation() {
+        AlertDialog.Builder(this)
+            .setTitle("Sair do Excellence?")
+            .setMessage("A reprodução será encerrada e o aplicativo será fechado.")
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Sair") { _, _ -> finishAffinity() }
             .show()
     }
 
@@ -2391,6 +2658,20 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onStop() {
+        val hadParentalAccess = parentalUnlocked
+        parentalUnlocked = false
+        if (hadParentalAccess && ::catalogAdapter.isInitialized && !homeMode) {
+            selectedCategory = "Todos"
+            selectedEntry = null
+            categoryCache.clear()
+            clearPreviewForSection(currentKind)
+            renderCategories()
+            renderCatalog()
+        }
+        super.onStop()
+    }
+
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
         stopMiniPlayer()
@@ -2414,6 +2695,11 @@ class MainActivity : Activity() {
         const val EXTRA_CATALOG_IMPORT_IN_PROGRESS = "catalog_import_in_progress"
         private const val PREF_KEEP_SCREEN = "keep_screen_on"
         private const val PREF_SHOW_EPG = "show_epg"
+        private const val PREF_PARENTAL_PIN_HASH = "parental_pin_hash"
+        private const val PREF_SUBTITLE_ENABLE = "subtitle_enable"
+        private const val PREF_LANGUAGE_CODE = "language_code"
+        private const val PREF_REMOTE_SYNC = "remote_sync_enabled"
+        private const val PREF_EXTERNAL_PLAYER = "external_player"
         private const val PREF_SELECTED_DNS = "selected_dns"
         private const val REQUEST_VOICE = 7101
         private const val REQUEST_VOICE_PERMISSION = 7102
