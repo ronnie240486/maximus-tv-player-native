@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Base64
 import java.io.BufferedReader
 import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
@@ -24,6 +25,7 @@ data class CatalogMetadata(
 class PlaylistRepository(private val context: Context) {
 
     private data class XtreamSource(val baseUrl: String, val username: String, val password: String)
+    private class PlaylistHttpException(val statusCode: Int) : IOException("HTTP $statusCode")
 
     private var externalMetadataByKey: Map<String, CatalogMetadata> = emptyMap()
     private var xtreamSource: XtreamSource? = null
@@ -64,7 +66,7 @@ class PlaylistRepository(private val context: Context) {
 
     fun loadIfChanged(urls: List<String>, onProgress: (Int) -> Unit, callback: (Result<CatalogSnapshot>) -> Unit) {
         executor.execute {
-            callback(runCatching {
+            val result = runCatching {
                 val normalized = normalizeUrls(urls)
                 xtreamSource = normalized.asSequence().mapNotNull(::parseXtreamSource).firstOrNull()
                 val stats = database.stats()
@@ -74,7 +76,14 @@ class PlaylistRepository(private val context: Context) {
                 } else {
                     downloadAndCache(normalized, onProgress)
                 }
-            })
+            }.recoverCatching { failure ->
+                // Uma falha de origem não deve apagar um catálogo local que já funciona.
+                val cached = database.stats()
+                if (cached.total <= 0) throw failure
+                onProgress(100)
+                CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = cached.total, groupCount = cached.groups, databaseBacked = true)
+            }
+            callback(result)
         }
     }
 
@@ -291,15 +300,29 @@ class PlaylistRepository(private val context: Context) {
 
     private fun streamUrls(urls: List<String>, emit: (CatalogEntry) -> Unit) {
         var total = 0
-        urls.forEach { url -> total += fetchAndParse(url, emit) }
-        if (total == 0) error("A lista do painel não contém entradas M3U válidas")
+        var firstFailure: Throwable? = null
+        urls.forEach { url ->
+            runCatching { fetchAndParse(url, emit) }
+                .onSuccess { total += it }
+                .onFailure { if (firstFailure == null) firstFailure = it }
+        }
+        if (total == 0) {
+            val reason = firstFailure?.message?.takeIf { it.isNotBlank() }
+            error(reason?.let { "Nenhuma playlist respondeu: $it" } ?: "A lista do painel não contém entradas M3U válidas")
+        }
     }
 
     private fun fetchAndParse(urlString: String, emit: (CatalogEntry) -> Unit): Int {
+        // Uma única tentativa por URL evita prender a tela em um proxy 522; o failover
+        // percorre as demais playlists e a próxima verificação automática tenta novamente.
+        return fetchAndParseOnce(urlString, emit)
+    }
+
+    private fun fetchAndParseOnce(urlString: String, emit: (CatalogEntry) -> Unit): Int {
         val connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 20_000
-            readTimeout = 60_000
+            connectTimeout = 6_000
+            readTimeout = 15_000
             setRequestProperty("Accept", "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*")
             setRequestProperty("Accept-Encoding", "gzip")
             setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
@@ -310,7 +333,7 @@ class PlaylistRepository(private val context: Context) {
         if (status !in 200..299) {
             stream?.close()
             connection.disconnect()
-            error("A lista do painel recusou a conexão (HTTP $status)")
+            throw PlaylistHttpException(status)
         }
         val rawInput = stream ?: run {
             connection.disconnect()
