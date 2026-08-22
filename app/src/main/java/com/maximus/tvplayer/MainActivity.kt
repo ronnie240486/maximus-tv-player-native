@@ -651,6 +651,7 @@ class MainActivity : Activity() {
     }
 
     private fun showHome() {
+        parentalUnlocked = false
         homeMode = true
         favoritesOnly = false
         radioMode = false
@@ -708,6 +709,7 @@ class MainActivity : Activity() {
     }
 
     private fun switchSection(kind: MediaKind) {
+        parentalUnlocked = false
         radioMode = false
         voiceMode = false
         radioDialog?.dismiss()
@@ -752,6 +754,7 @@ class MainActivity : Activity() {
     }
 
     private fun switchFavorites() {
+        parentalUnlocked = false
         radioMode = false
         voiceMode = false
         radioDialog?.dismiss()
@@ -821,6 +824,11 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(-2, -1).apply { setMargins(3, 0, 3, 0) }
                 setOnClickListener {
                     val applyCategory = {
+                        if (selectedCategory == ContentSafety.LOCKED_CATEGORY && category != ContentSafety.LOCKED_CATEGORY) {
+                            parentalUnlocked = false
+                            selectedEntry = null
+                            clearPreviewForSection(currentKind)
+                        }
                         selectedCategory = category
                         renderCategories()
                         renderCatalog()
@@ -2329,6 +2337,7 @@ class MainActivity : Activity() {
     }
 
     private fun switchRadio() {
+        parentalUnlocked = false
         radioDialog?.dismiss()
         radioMode = true
         voiceMode = false
