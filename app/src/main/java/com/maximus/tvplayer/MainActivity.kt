@@ -361,7 +361,17 @@ class MainActivity : Activity() {
         if (isWithin(focused, categoryList)) {
             val index = categoryList.indexOfChild(focused)
             return when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> if (index <= 0) focusNavigationForCurrentSection() else categoryList.getChildAt(index - 1).requestFocus()
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    if (selectedCategory == ContentSafety.LOCKED_CATEGORY) {
+                        parentalUnlocked = false
+                        selectedCategory = "Todos"
+                        selectedEntry = null
+                        clearPreviewForSection(currentKind)
+                        renderCategories()
+                        renderCatalog()
+                    }
+                    if (index <= 0) focusNavigationForCurrentSection() else categoryList.getChildAt(index - 1).requestFocus()
+                }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (index >= categoryList.childCount - 1) focusFirstCatalogItem() else categoryList.getChildAt(index + 1).requestFocus()
                 KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCatalogItem()
