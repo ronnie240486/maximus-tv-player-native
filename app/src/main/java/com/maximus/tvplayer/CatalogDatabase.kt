@@ -17,15 +17,18 @@ class CatalogDatabase(context: Context) {
         var movieCount = 0
         var seriesCount = 0
         val groups = HashSet<String>()
+        // O catálogo é um cache reconstruível: durante a importação, priorizamos velocidade.
+        db.execSQL("PRAGMA synchronous=OFF")
+        db.execSQL("PRAGMA temp_store=MEMORY")
+        // Remover índices antes do DELETE evita manter três estruturas enquanto a tabela é esvaziada.
+        db.execSQL("DROP INDEX IF EXISTS idx_catalog_kind_group")
+        db.execSQL("DROP INDEX IF EXISTS idx_catalog_name")
+        db.execSQL("DROP INDEX IF EXISTS idx_catalog_series_season")
         db.beginTransactionNonExclusive()
         try {
             db.delete(TABLE, null, null)
-            // Índices são caros em 274k inserts. Recriá-los ao final reduz muito o tempo em TV Box.
-            db.execSQL("DROP INDEX IF EXISTS idx_catalog_kind_group")
-            db.execSQL("DROP INDEX IF EXISTS idx_catalog_name")
-            db.execSQL("DROP INDEX IF EXISTS idx_catalog_series_season")
             val statement = db.compileStatement(
-                "INSERT OR REPLACE INTO $TABLE " +
+                "INSERT INTO $TABLE " +
                     "(item_key,name,group_title,tvg_id,logo_url,stream_url,kind,quality,series_group,season,episode,year,synopsis,cast,backdrop_url,trailer_url,runtime) " +
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             )
@@ -49,6 +52,7 @@ class CatalogDatabase(context: Context) {
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_kind_group ON $TABLE(kind, group_title)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_name ON $TABLE(name COLLATE NOCASE)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_series_season ON $TABLE(kind, series_group, season)")
+            db.execSQL("PRAGMA synchronous=NORMAL")
         }
         return Stats(total, liveCount, movieCount, seriesCount, groups.size)
     }
