@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.KeyEvent
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
@@ -85,6 +86,37 @@ class ActivationActivity : Activity() {
         connectButton.requestFocus()
         setConnectionProgress(0, "Aguardando conexão com o painel...")
         verifyAccess(false)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                -> {
+                    val targets = listOf(
+                        findViewById<View>(R.id.macValue),
+                        findViewById<View>(R.id.copyMacButton),
+                        connectButton,
+                        verifyButton,
+                    )
+                    val current = targets.indexOf(currentFocus).coerceAtLeast(0)
+                    val delta = if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1
+                    return targets[(current + delta).coerceIn(0, targets.lastIndex)].requestFocus()
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    val focused = currentFocus
+                    if (focused != null && focused.isShown && focused.isEnabled && focused.isClickable) {
+                        focused.performClick()
+                        return true
+                    }
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun updateClock() {

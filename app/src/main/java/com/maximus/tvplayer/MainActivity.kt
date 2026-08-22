@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -59,6 +60,7 @@ class MainActivity : Activity() {
     private val pageSize = 120
     private lateinit var channelList: RecyclerView
     private lateinit var videoPreview: FrameLayout
+    private lateinit var previewScroll: ScrollView
     private lateinit var categoryList: LinearLayout
     private lateinit var navItems: LinearLayout
     private lateinit var appLogo: ImageView
@@ -136,6 +138,7 @@ class MainActivity : Activity() {
     private var radioDialog: Dialog? = null
     private var remoteConfig: RemoteAppConfig? = null
     private var radioEntries: List<CatalogEntry> = emptyList()
+    private var focusCatalogWhenReady = false
     private var catalogImportInProgress = false
     private var catalogImportWatcherStarted = false
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -226,6 +229,7 @@ class MainActivity : Activity() {
         renderCatalog()
         selectedEntry = catalog.entries.firstOrNull()
         selectedEntry?.let { selectEntry(it, false) }
+        window.decorView.post { if (currentFocus == null) focusNavigationForCurrentSection() }
         loadRemoteConfiguration()
     }
 
@@ -236,6 +240,7 @@ class MainActivity : Activity() {
         brandSubtitle = findViewById(R.id.brandSubtitle)
         channelList = findViewById(R.id.channelList)
         videoPreview = findViewById(R.id.videoPreview)
+        previewScroll = findViewById(R.id.previewScroll)
         categoryList = findViewById(R.id.categoryList)
         navItems = findViewById(R.id.navItems)
         searchHint = findViewById(R.id.searchHint)
@@ -260,6 +265,8 @@ class MainActivity : Activity() {
         actionRow = findViewById(R.id.actionRow)
         previewScaleButton = findViewById(R.id.previewScaleButton)
         previewScaleButton.background = rounded(0xCC101827, 10f)
+        previewScaleButton.isFocusable = true
+        previewScaleButton.isClickable = true
         previewScaleButton.setOnClickListener { cyclePreviewScale() }
         previewScaleButton.setOnFocusChangeListener { view, hasFocus ->
             view.background = rounded(if (hasFocus) 0xFF4CE8F0 else 0xCC101827, 10f)
@@ -279,15 +286,216 @@ class MainActivity : Activity() {
         homeMoviesCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
         homeSeriesCard.setOnClickListener { switchSection(MediaKind.SERIES) }
         homeCartoonsCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
+        listOf(
+            findViewById<View>(R.id.homeNavHome),
+            findViewById<View>(R.id.homeNavChannels),
+            findViewById<View>(R.id.homeNavMovies),
+            findViewById<View>(R.id.homeNavSeries),
+        ).forEach { it.isFocusable = true; it.isClickable = true }
         findViewById<View>(R.id.homeNavHome).setOnClickListener { showHome() }
         findViewById<View>(R.id.homeNavChannels).setOnClickListener { switchSection(MediaKind.LIVE) }
         findViewById<View>(R.id.homeNavMovies).setOnClickListener { switchSection(MediaKind.MOVIE) }
         findViewById<View>(R.id.homeNavSeries).setOnClickListener { switchSection(MediaKind.SERIES) }
+        searchHint.isFocusable = true
+        searchHint.isClickable = true
         searchHint.setOnClickListener { showSearchDialog() }
         previewScaleButton.visibility = View.GONE
         videoPreview.isFocusable = true
         videoPreview.isClickable = true
         videoPreview.setOnClickListener { selectedEntry?.let { handleEntryClick(it) } }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                -> if (moveDpad(event.keyCode)) return true
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    val focused = currentFocus
+                    if (focused != null && focused.isShown && focused.isEnabled && focused.isClickable) {
+                        focused.performClick()
+                        return true
+                    }
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    onBackPressed()
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun moveDpad(keyCode: Int): Boolean {
+        val focused = currentFocus ?: return false
+        if (homeMode) return moveHomeDpad(focused, keyCode)
+
+        if (focused === searchHint) {
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCategory() || focusFirstCatalogItem()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
+                else -> false
+            }
+        }
+        if (isWithin(focused, navItems)) {
+            val index = navItems.indexOfChild(focused)
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> focusNavigation(index - 1)
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusNavigation(index + 1)
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCatalogItem() || focusFirstCategory() || focusPreview()
+                KeyEvent.KEYCODE_DPAD_LEFT -> true
+                else -> false
+            }
+        }
+        if (isWithin(focused, categoryList)) {
+            val index = categoryList.indexOfChild(focused)
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (index <= 0) focusNavigationForCurrentSection() else categoryList.getChildAt(index - 1).requestFocus()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (index >= categoryList.childCount - 1) focusFirstCatalogItem() else categoryList.getChildAt(index + 1).requestFocus()
+                KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCatalogItem()
+                else -> false
+            }
+        }
+        if (isWithin(focused, channelList)) {
+            val row = catalogRowForFocus(focused)
+            val position = row?.let { channelList.getChildAdapterPosition(it) } ?: RecyclerView.NO_POSITION
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
+                KeyEvent.KEYCODE_DPAD_UP -> if (position <= 0) focusFirstCategory() || searchHint.requestFocus() else false
+                else -> false
+            }
+        }
+        if (isWithin(focused, previewScroll)) {
+            if (isWithin(focused, videoPreview)) {
+                return when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstAction() || previewScaleButton.requestFocus()
+                    else -> false
+                }
+            }
+            if (isWithin(focused, actionRow)) {
+                val index = actionRow.indexOfChild(focused)
+                return when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusAction(index + 1)
+                    else -> false
+                }
+            }
+        }
+        return false
+    }
+
+    private fun moveHomeDpad(focused: View, keyCode: Int): Boolean {
+        val top = listOf(
+            findViewById<View>(R.id.homeNavHome),
+            findViewById<View>(R.id.homeNavChannels),
+            findViewById<View>(R.id.homeNavMovies),
+            findViewById<View>(R.id.homeNavSeries),
+        )
+        val cards = listOf(homeMoviesCard, homeSeriesCard, homeCartoonsCard)
+        return when {
+            focused in top -> {
+                val index = top.indexOf(focused)
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> if (index > 0) top[index - 1].requestFocus() else true
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> if (index < top.lastIndex) top[index + 1].requestFocus() else true
+                    KeyEvent.KEYCODE_DPAD_DOWN -> cards.getOrNull(index.coerceAtMost(cards.lastIndex))?.requestFocus() ?: true
+                    KeyEvent.KEYCODE_DPAD_UP -> true
+                    else -> false
+                }
+            }
+            focused in cards -> {
+                val index = cards.indexOf(focused)
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> if (index > 0) cards[index - 1].requestFocus() else true
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> if (index < cards.lastIndex) cards[index + 1].requestFocus() else true
+                    KeyEvent.KEYCODE_DPAD_UP -> top.getOrNull(index.coerceAtMost(top.lastIndex))?.requestFocus() ?: true
+                    else -> false
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun focusNavigation(index: Int): Boolean {
+        if (navItems.childCount == 0) return false
+        val targetIndex = index.coerceIn(0, navItems.childCount - 1)
+        return navItems.getChildAt(targetIndex).requestFocus()
+    }
+
+    private fun focusNavigationForCurrentSection(): Boolean {
+        val target = (0 until navItems.childCount)
+            .map { navItems.getChildAt(it) }
+            .firstOrNull { isNavigationSelected(it.tag as? String ?: "") }
+            ?: navItems.getChildAt(0)
+        return target?.requestFocus() == true
+    }
+
+    private fun focusFirstCategory(): Boolean = categoryList.getChildAt(0)?.requestFocus() == true
+
+    private fun focusFirstCatalogItem(): Boolean {
+        val item = channelList.getChildAt(0) ?: return false
+        return item.requestFocus()
+    }
+
+    private fun focusSelectedCatalogItem(): Boolean {
+        val key = selectedEntry?.key
+        val item = (0 until channelList.childCount)
+            .map { channelList.getChildAt(it) }
+            .firstOrNull { key != null && it.tag == key }
+            ?: return false
+        return item.requestFocus()
+    }
+
+    private fun catalogRowForFocus(view: View): View? {
+        var current: View? = view
+        while (current != null && current !== channelList) {
+            if (current.parent === channelList) return current
+            current = current.parent as? View
+        }
+        return null
+    }
+
+    private fun focusPreview(): Boolean = if (previewScroll.visibility == View.VISIBLE) videoPreview.requestFocus() else false
+
+    private fun focusFirstAction(): Boolean = actionRow.getChildAt(0)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
+
+    private fun focusAction(index: Int): Boolean = actionRow.getChildAt(index)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
+
+    private fun isWithin(view: View?, parent: View): Boolean {
+        var current = view
+        while (current != null) {
+            if (current === parent) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    override fun onBackPressed() {
+        if (seriesEpisodesDialog?.isShowing == true || seriesSeasonsDialog?.isShowing == true || radioDialog?.isShowing == true) {
+            super.onBackPressed()
+            return
+        }
+        if (miniPlayer != null || miniTrailerView != null) {
+            stopMiniPlayer()
+            return
+        }
+        if (!homeMode) {
+            showHome()
+            return
+        }
+        super.onBackPressed()
     }
 
     private fun cyclePreviewScale() {
@@ -445,6 +653,7 @@ class MainActivity : Activity() {
         voiceMode = false
         radioDialog?.dismiss()
         homePanel.visibility = View.VISIBLE
+        homePanel.post { findViewById<View>(R.id.homeNavHome).requestFocus() }
         findViewById<View>(R.id.sideNavigation).visibility = View.GONE
         findViewById<View>(R.id.channelColumn).visibility = View.GONE
         findViewById<View>(R.id.previewScroll).visibility = View.GONE
@@ -535,6 +744,7 @@ class MainActivity : Activity() {
         renderCategories()
         renderCatalog()
         selectFirstVisible()
+        focusCatalogWhenReady = true
     }
 
     private fun switchFavorites() {
@@ -564,6 +774,7 @@ class MainActivity : Activity() {
         renderCategories()
         renderCatalog()
         selectFirstVisible()
+        focusCatalogWhenReady = true
     }
 
     private fun renderCategories() {
@@ -662,6 +873,10 @@ class MainActivity : Activity() {
                 if (offset == 0) {
                     catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
                     if (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key }) selectEntry(page.first(), false)
+                    if (focusCatalogWhenReady) {
+                        focusCatalogWhenReady = false
+                        channelList.post { focusFirstCatalogItem() }
+                    }
                 } else {
                     catalogAdapter.append(page)
                 }
@@ -1308,6 +1523,43 @@ class MainActivity : Activity() {
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         dialog.setContentView(root)
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            val focused = dialog.window?.decorView?.findFocus()
+            val buttons = (0 until list.childCount)
+                .map { list.getChildAt(it) }
+                .filter { it.isFocusable && it.isShown }
+            when (keyCode) {
+                KeyEvent.KEYCODE_BACK -> {
+                    close.performClick()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    when {
+                        focused === close -> buttons.firstOrNull()?.requestFocus() ?: true
+                        else -> {
+                            val index = buttons.indexOf(focused)
+                            buttons.getOrNull(index + 1)?.requestFocus() ?: true
+                        }
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    when {
+                        focused === close -> true
+                        else -> {
+                            val index = buttons.indexOf(focused)
+                            if (index <= 0) close.requestFocus() else buttons.getOrNull(index - 1)?.requestFocus() ?: true
+                        }
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> close.requestFocus()
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> focused?.takeIf { it.isClickable && it.isEnabled }?.performClick() == true
+                else -> false
+            }
+        }
         dialog.setOnShowListener {
             dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
             dialog.window?.setLayout(
@@ -1485,6 +1737,7 @@ class MainActivity : Activity() {
             renderCategories()
             renderCatalog()
             if (selectedEntry == null) selectFirstVisible()
+            if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
         }
         renderVodStrip()
     }
@@ -1514,6 +1767,7 @@ class MainActivity : Activity() {
         selectFirstVisible()
         loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
         renderVodStrip()
+        if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
     }
 
     private fun renderVodStrip() {

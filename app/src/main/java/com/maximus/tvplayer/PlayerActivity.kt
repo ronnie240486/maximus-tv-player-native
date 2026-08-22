@@ -4,6 +4,7 @@ import android.app.Activity
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
@@ -63,6 +64,7 @@ class PlayerActivity : Activity() {
             view.background = rounded(if (hasFocus) 0xFF4CE8F0.toInt() else 0xCC101827.toInt(), 10f)
             (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
         }
+        backButton.post { backButton.requestFocus() }
         applyScale()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val streamUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
@@ -87,6 +89,40 @@ class PlayerActivity : Activity() {
             exo.prepare()
             exo.playWhenReady = true
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_BACK -> {
+                    finish()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_UP,
+                -> {
+                    showBackButtonTemporarily()
+                    return backButton.requestFocus()
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                -> {
+                    showBackButtonTemporarily()
+                    return scaleButton.requestFocus()
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    val focused = currentFocus
+                    if (focused != null && focused.isShown && focused.isEnabled && focused.isClickable) {
+                        focused.performClick()
+                        return true
+                    }
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun showBackButtonTemporarily() {
