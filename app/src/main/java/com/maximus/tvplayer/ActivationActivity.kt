@@ -31,6 +31,8 @@ class ActivationActivity : Activity() {
     private lateinit var connectionMessage: TextView
     private var checking = false
     private var loadingStartedAt = 0L
+    private var mainOpened = false
+    private var keepImporterAlive = false
     private val integration = AppIntegrationRepository()
     private val playlistRepository by lazy { PlaylistRepository(this) }
     private val handler = Handler(Looper.getMainLooper())
@@ -144,38 +146,83 @@ class ActivationActivity : Activity() {
                         return@onSuccess
                     }
                     loadingPanelList = true
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                        .putBoolean(PREF_IMPORT_IN_PROGRESS, true)
+                        .apply()
                     setConnectionProgress(60, "Lista encontrada. Conectando sua lista de filmes, séries e canais...")
                     verifyButton.isEnabled = false
                     connectButton.isEnabled = false
                     status.text = "Lista do painel encontrada. Carregando canais, filmes e séries..."
-                            playlistRepository.loadIfChanged(config.playlistUrls, { progress ->
-                                runOnUiThread { setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...") }
-                            }) { playlistResult ->
-                        runOnUiThread {
-                            loadingPanelList = false
-                            playlistResult.onSuccess {
-                                setConnectionProgress(100, "Conectado. Em breve você terá em mãos o melhor conteúdo para assistir.")
-                                status.text = "Conectado. Abrindo catálogo..."
-                                status.setTextColor(getColor(R.color.success))
-                                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                                    .putBoolean(PREF_ACCESS_ALLOWED, true)
-                                    .apply()
-                                handler.removeCallbacks(periodicCheck)
-                                startActivity(Intent(this, MainActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                                })
-                                finish()
-                            }.onFailure {
-                                verifyButton.isEnabled = true
-                                connectButton.isEnabled = true
-                                val reason = it.message.orEmpty()
-                                val message = explainFailure(reason)
-                                setConnectionProgress(40, message)
-                                status.text = message
-                                status.setTextColor(getColor(R.color.warning))
+                            playlistRepository.loadIfChanged(
+                        config.playlistUrls,
+                        onProgress = { progress ->
+                            runOnUiThread {
+                                setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...")
                             }
-                        }
-                    }
+                        },
+                        onCatalogReady = { stats ->
+                            runOnUiThread {
+                                if (!mainOpened && stats.total > 0) {
+                                    // O primeiro lote já foi COMMITADO. A tela principal pode
+                                    // consultar SQLite enquanto o restante da M3U continua.
+                                    setConnectionProgress(86, "Catálogo inicial pronto. Organizando o restante em segundo plano...")
+                                    status.text = "Catálogo inicial pronto. Abrindo Excellence..."
+                                    status.setTextColor(getColor(R.color.success))
+                                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                        .putBoolean(PREF_ACCESS_ALLOWED, true)
+                                        .apply()
+                                    keepImporterAlive = true
+                                    openMainActivity(importInProgress = true)
+                                }
+                            }
+                        },
+                        callback = { playlistResult ->
+                            runOnUiThread {
+                                loadingPanelList = false
+                                playlistResult.onSuccess {
+                                    setConnectionProgress(100, "Conectado. Em breve você terá em mãos o melhor conteúdo para assistir.")
+                                    status.text = "Catálogo completo."
+                                    status.setTextColor(getColor(R.color.success))
+                                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                        .putBoolean(PREF_ACCESS_ALLOWED, true)
+                                        .putBoolean(PREF_IMPORT_IN_PROGRESS, false)
+                                        .apply()
+                                    handler.removeCallbacks(periodicCheck)
+                                    if (mainOpened) {
+                                        // A MainActivity já está visível; apenas liberar o
+                                        // importador agora que seu trabalho terminou.
+                                        keepImporterAlive = false
+                                        playlistRepository.shutdown()
+                                        finish()
+                                    } else {
+                                        openMainActivity(importInProgress = false)
+                                    }
+                                }.onFailure {
+                                    if (mainOpened) {
+                                        // O primeiro lote continua disponível para a MainActivity;
+                                        // não devolver o usuário à tela de MAC por uma falha tardia.
+                                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                            .putBoolean(PREF_IMPORT_IN_PROGRESS, false)
+                                            .apply()
+                                        keepImporterAlive = false
+                                        playlistRepository.shutdown()
+                                        finish()
+                                    } else {
+                                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                            .putBoolean(PREF_IMPORT_IN_PROGRESS, false)
+                                            .apply()
+                                        verifyButton.isEnabled = true
+                                        connectButton.isEnabled = true
+                                        val reason = it.message.orEmpty()
+                                        val message = explainFailure(reason)
+                                        setConnectionProgress(40, message)
+                                        status.text = message
+                                        status.setTextColor(getColor(R.color.warning))
+                                    }
+                                }
+                            }
+                        },
+                    )
                 }.onFailure {
                     setConnectionProgress(20, "O painel não respondeu. Tentando novamente automaticamente...")
                     status.text = "Não foi possível consultar o painel. Toque em CONECTAR para tentar novamente."
@@ -196,10 +243,21 @@ class ActivationActivity : Activity() {
         super.onPause()
     }
 
+    private fun openMainActivity(importInProgress: Boolean) {
+        if (mainOpened) return
+        mainOpened = true
+        handler.removeCallbacks(periodicCheck)
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(MainActivity.EXTRA_CATALOG_IMPORT_IN_PROGRESS, importInProgress)
+        })
+        if (!importInProgress) finish()
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         handler.removeCallbacks(clockTicker)
-        playlistRepository.shutdown()
+        if (!keepImporterAlive) playlistRepository.shutdown()
         integration.shutdown()
         super.onDestroy()
     }
@@ -207,6 +265,7 @@ class ActivationActivity : Activity() {
     companion object {
         const val PREFS_NAME = "maximus_device_preferences"
         const val PREF_MAC_ADDRESS = "mac_address"
+        const val PREF_IMPORT_IN_PROGRESS = "catalog_import_in_progress"
         private const val PREF_ACCESS_ALLOWED = "access_allowed"
     }
 }

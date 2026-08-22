@@ -10,13 +10,20 @@ class CatalogDatabase(context: Context) {
 
     private val helper = Helper(context.applicationContext)
 
-    fun replaceStreaming(feed: ((CatalogEntry) -> Unit) -> Unit, onProgress: (Int) -> Unit = {}): Stats {
+    fun replaceStreaming(
+        feed: ((CatalogEntry) -> Unit) -> Unit,
+        onProgress: (Int) -> Unit = {},
+        onCatalogReady: (Stats) -> Unit = {},
+    ): Stats {
         val db = helper.writableDatabase
         var total = 0
         var liveCount = 0
         var movieCount = 0
         var seriesCount = 0
         val groups = HashSet<String>()
+        var transactionOpen = false
+        var readySent = false
+        val batchSize = 2_000
         // O catálogo é um cache reconstruível: durante a importação, priorizamos velocidade.
         db.execSQL("PRAGMA synchronous=OFF")
         db.execSQL("PRAGMA temp_store=MEMORY")
@@ -24,8 +31,21 @@ class CatalogDatabase(context: Context) {
         db.execSQL("DROP INDEX IF EXISTS idx_catalog_kind_group")
         db.execSQL("DROP INDEX IF EXISTS idx_catalog_name")
         db.execSQL("DROP INDEX IF EXISTS idx_catalog_series_season")
-        db.beginTransactionNonExclusive()
+        fun beginBatch() {
+            if (!transactionOpen) {
+                db.beginTransactionNonExclusive()
+                transactionOpen = true
+            }
+        }
+        fun commitBatch() {
+            if (transactionOpen) {
+                db.setTransactionSuccessful()
+                db.endTransaction()
+                transactionOpen = false
+            }
+        }
         try {
+            beginBatch()
             db.delete(TABLE, null, null)
             val statement = db.compileStatement(
                 "INSERT OR IGNORE INTO $TABLE " +
@@ -45,11 +65,22 @@ class CatalogDatabase(context: Context) {
                     }
                     groups += entry.groupTitle
                     if (total % 2_000 == 0) onProgress((60 + total / 8_000).coerceAtMost(94))
+                    if (total % batchSize == 0) {
+                        commitBatch()
+                        if (!readySent && total >= batchSize) {
+                            readySent = true
+                            runCatching { onCatalogReady(Stats(total, liveCount, movieCount, seriesCount, groups.size)) }
+                        }
+                        beginBatch()
+                    }
                 }
             }
-            db.setTransactionSuccessful()
+            commitBatch()
         } finally {
-            db.endTransaction()
+            if (transactionOpen) {
+                db.endTransaction()
+                transactionOpen = false
+            }
             // Recriar fora da transação garante índices mesmo se o download falhar no meio.
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_kind_group ON $TABLE(kind, group_title)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_name ON $TABLE(name COLLATE NOCASE)")

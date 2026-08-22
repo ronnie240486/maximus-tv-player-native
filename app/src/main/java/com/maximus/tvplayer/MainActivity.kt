@@ -11,6 +11,8 @@ import android.speech.RecognizerIntent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -134,6 +136,25 @@ class MainActivity : Activity() {
     private var radioDialog: Dialog? = null
     private var remoteConfig: RemoteAppConfig? = null
     private var radioEntries: List<CatalogEntry> = emptyList()
+    private var catalogImportInProgress = false
+    private var catalogImportWatcherStarted = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val catalogImportWatcher = object : Runnable {
+        override fun run() {
+            if (!catalogImportInProgress) return
+            repository.loadCached { snapshot ->
+                runOnUiThread {
+                    val stillLoading = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+                        .getBoolean(ActivationActivity.PREF_IMPORT_IN_PROGRESS, true)
+                    if (snapshot != null && snapshot.totalCount > 0 && snapshot.totalCount != catalog.totalCount) {
+                        applyPartialCatalogSnapshot(snapshot, stillLoading)
+                    }
+                    catalogImportInProgress = stillLoading
+                    if (stillLoading) mainHandler.postDelayed(this, 2_000)
+                }
+            }
+        }
+    }
 
     private val editorials = mapOf(
         "animal planet" to ChannelEditorial(
@@ -196,6 +217,7 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             )
         setContentView(R.layout.activity_main)
+        catalogImportInProgress = intent.getBooleanExtra(EXTRA_CATALOG_IMPORT_IN_PROGRESS, false)
         sortAlphabetically = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_SORT_ALPHA, false)
         bindViews()
         setupCatalogList()
@@ -1366,6 +1388,7 @@ class MainActivity : Activity() {
     private fun loadRemoteConfiguration() {
         val mac = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
         if (mac.isBlank()) return
+        val catalogImportAlreadyStarted = intent.getBooleanExtra(EXTRA_CATALOG_IMPORT_IN_PROGRESS, false)
         appIntegration.fetchConfig(mac) { result ->
             runOnUiThread {
                 result.onSuccess { config ->
@@ -1373,7 +1396,8 @@ class MainActivity : Activity() {
                         showAccessUnavailable(config)
                         return@onSuccess
                     }
-                    applyRemoteConfig(config)
+                    applyRemoteConfig(config, catalogImportAlreadyStarted)
+                    if (catalogImportAlreadyStarted) startCatalogImportWatcher()
                     appIntegration.startBackgroundSync(
                         mac = mac,
                         currentContent = { selectedEntry?.name },
@@ -1387,7 +1411,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun applyRemoteConfig(config: RemoteAppConfig) {
+    private fun applyRemoteConfig(config: RemoteAppConfig, catalogImportAlreadyStarted: Boolean = false) {
         remoteConfig = config
         brandMark.text = "EXCELLENCE"
         brandSubtitle.text = "TV PLAYER"
@@ -1414,10 +1438,27 @@ class MainActivity : Activity() {
             }
         }
         if (config.playlistUrls.isNotEmpty()) {
-            repository.loadIfChanged(config.playlistUrls) { result ->
-                runOnUiThread {
-                    result.onSuccess { loaded -> applyCatalogSnapshot(loaded, config) }
-                        .onFailure { showCatalogUnavailable("A lista do painel não está disponível nesta TV Box.") }
+            if (catalogImportAlreadyStarted) {
+                // A ActivationActivity já iniciou a importação e confirmou o primeiro lote.
+                // Ler o cache aqui evita um segundo HEAD/download/parser da mesma M3U.
+                repository.loadCached { cached ->
+                    runOnUiThread {
+                        if (cached != null && cached.totalCount > 0) {
+                            applyCatalogSnapshot(cached, config)
+                            if (cached.totalCount < 4_000) {
+                                greeting.text = "Olá, usuário  •  lista sendo atualizada..."
+                            }
+                        } else {
+                            showCatalogUnavailable("O catálogo inicial está sendo preparado.")
+                        }
+                    }
+                }
+            } else {
+                repository.loadIfChanged(config.playlistUrls) { result ->
+                    runOnUiThread {
+                        result.onSuccess { loaded -> applyCatalogSnapshot(loaded, config) }
+                            .onFailure { showCatalogUnavailable("A lista do painel não está disponível nesta TV Box.") }
+                    }
                 }
             }
         } else {
@@ -1426,6 +1467,32 @@ class MainActivity : Activity() {
         if (config.apkVersion.isNotBlank() && config.apkDownloadUrl.isNotBlank() && config.apkVersion != packageManager.getPackageInfo(packageName, 0).versionName) {
             Toast.makeText(this, "Há uma atualização disponível: ${config.apkVersion}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun applyPartialCatalogSnapshot(snapshot: CatalogSnapshot, stillLoading: Boolean) {
+        if (snapshot.totalCount <= 0) return
+        val wasHome = homeMode
+        catalog = snapshot
+        databaseBackedCatalog = snapshot.databaseBacked
+        categoryCache.clear()
+        categoryRequestId++
+        greeting.text = if (stillLoading) {
+            "Olá, usuário  •  ${snapshot.totalCount} itens carregados • atualizando..."
+        } else {
+            "Olá, usuário  •  ${snapshot.totalCount} itens"
+        }
+        if (!wasHome && !radioMode) {
+            renderCategories()
+            renderCatalog()
+            if (selectedEntry == null) selectFirstVisible()
+        }
+        renderVodStrip()
+    }
+
+    private fun startCatalogImportWatcher() {
+        if (!catalogImportInProgress || catalogImportWatcherStarted) return
+        catalogImportWatcherStarted = true
+        mainHandler.post(catalogImportWatcher)
     }
 
     private fun applyCatalogSnapshot(snapshot: CatalogSnapshot, config: RemoteAppConfig) {
@@ -2071,6 +2138,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         stopMiniPlayer()
         repository.shutdown()
         imageLoader.shutdown()
@@ -2089,6 +2157,7 @@ class MainActivity : Activity() {
         private const val PREF_LAST_MESSAGE_KEY = "last_remote_message_key"
         private const val PREF_TRAILER_AUDIO = "trailer_audio_enabled"
         private const val PREF_AUTOPLAY = "autoplay_enabled"
+        const val EXTRA_CATALOG_IMPORT_IN_PROGRESS = "catalog_import_in_progress"
         private const val PREF_KEEP_SCREEN = "keep_screen_on"
         private const val PREF_SHOW_EPG = "show_epg"
         private const val PREF_SELECTED_DNS = "selected_dns"

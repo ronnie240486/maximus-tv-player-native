@@ -64,7 +64,15 @@ class PlaylistRepository(private val context: Context) {
 
     fun loadIfChanged(urls: List<String>, callback: (Result<CatalogSnapshot>) -> Unit) = loadIfChanged(urls, {}, callback)
 
-    fun loadIfChanged(urls: List<String>, onProgress: (Int) -> Unit, callback: (Result<CatalogSnapshot>) -> Unit) {
+    fun loadIfChanged(urls: List<String>, onProgress: (Int) -> Unit, callback: (Result<CatalogSnapshot>) -> Unit) =
+        loadIfChanged(urls, onProgress, {}, callback)
+
+    fun loadIfChanged(
+        urls: List<String>,
+        onProgress: (Int) -> Unit,
+        onCatalogReady: (CatalogDatabase.Stats) -> Unit,
+        callback: (Result<CatalogSnapshot>) -> Unit,
+    ) {
         executor.execute {
             val result = runCatching {
                 val normalized = normalizeUrls(urls)
@@ -74,7 +82,7 @@ class PlaylistRepository(private val context: Context) {
                     onProgress(100)
                     CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = stats.total, groupCount = stats.groups, databaseBacked = true)
                 } else {
-                    downloadAndCache(normalized, onProgress)
+                    downloadAndCache(normalized, onProgress, onCatalogReady)
                 }
             }.recoverCatching { failure ->
                 // Uma falha de origem não deve apagar um catálogo local que já funciona.
@@ -141,13 +149,20 @@ class PlaylistRepository(private val context: Context) {
         metadata.edit().clear().apply()
     }
 
-    private fun downloadAndCache(urls: List<String>): CatalogSnapshot = downloadAndCache(urls, {})
+    private fun downloadAndCache(urls: List<String>): CatalogSnapshot = downloadAndCache(urls, {}, {})
 
-    private fun downloadAndCache(urls: List<String>, onProgress: (Int) -> Unit): CatalogSnapshot {
+    private fun downloadAndCache(urls: List<String>, onProgress: (Int) -> Unit): CatalogSnapshot =
+        downloadAndCache(urls, onProgress, {})
+
+    private fun downloadAndCache(
+        urls: List<String>,
+        onProgress: (Int) -> Unit,
+        onCatalogReady: (CatalogDatabase.Stats) -> Unit,
+    ): CatalogSnapshot {
         val normalized = normalizeUrls(urls)
         xtreamSource = normalized.asSequence().mapNotNull(::parseXtreamSource).firstOrNull()
         externalMetadataByKey = emptyMap()
-        val stats = database.replaceStreaming({ emit -> streamUrls(normalized, emit) }, onProgress)
+        val stats = database.replaceStreaming({ emit -> streamUrls(normalized, emit) }, onProgress, onCatalogReady)
         if (stats.total == 0) error("A lista do painel está vazia ou indisponível")
         onProgress(100)
         saveSourceMetadata(normalized)
@@ -263,11 +278,12 @@ class PlaylistRepository(private val context: Context) {
         if (metadata.getInt("format_version", 0) != 8) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
-        return urls.any { url ->
-            val savedSignature = metadata.getString("signature_${url.hashCode()}", "").orEmpty()
-            val remoteSignature = headSignature(url)
-            savedSignature.isNotBlank() && remoteSignature != null && remoteSignature != savedSignature
-        }
+        // Apenas a fonte ativa precisa ser validada no boot. As demais URLs são
+        // alternativas de failover e só serão acessadas se a primária falhar.
+        val activeUrl = urls.firstOrNull() ?: return false
+        val savedSignature = metadata.getString("signature_${activeUrl.hashCode()}", "").orEmpty()
+        val remoteSignature = headSignature(activeUrl)
+        return savedSignature.isNotBlank() && remoteSignature != null && remoteSignature != savedSignature
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
@@ -299,17 +315,29 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun streamUrls(urls: List<String>, emit: (CatalogEntry) -> Unit) {
-        var total = 0
         var firstFailure: Throwable? = null
-        urls.forEach { url ->
-            runCatching { fetchAndParse(url, emit) }
-                .onSuccess { total += it }
-                .onFailure { if (firstFailure == null) firstFailure = it }
+        for (url in urls) {
+            var emittedForUrl = 0
+            val result = runCatching {
+                fetchAndParse(url) { entry ->
+                    emittedForUrl++
+                    emit(entry)
+                }
+            }
+            if (result.isSuccess && result.getOrThrow() > 0) {
+                // playlist_urls representa fontes alternativas/failover. A lista ativa é
+                // suficiente para o primeiro catálogo; não concatenar cópias da mesma conta.
+                return
+            }
+            result.exceptionOrNull()?.let { failure ->
+                if (firstFailure == null) firstFailure = failure
+                // Se a origem começou a emitir entradas e caiu no meio, não misturar uma
+                // segunda fonte no mesmo catálogo; a transação do lote fará rollback final.
+                if (emittedForUrl > 0) throw failure
+            }
         }
-        if (total == 0) {
-            val reason = firstFailure?.message?.takeIf { it.isNotBlank() }
-            error(reason?.let { "Nenhuma playlist respondeu: $it" } ?: "A lista do painel não contém entradas M3U válidas")
-        }
+        val reason = firstFailure?.message?.takeIf { it.isNotBlank() }
+        error(reason?.let { "Nenhuma playlist respondeu: $it" } ?: "A lista do painel não contém entradas M3U válidas")
     }
 
     private fun fetchAndParse(urlString: String, emit: (CatalogEntry) -> Unit): Int {
