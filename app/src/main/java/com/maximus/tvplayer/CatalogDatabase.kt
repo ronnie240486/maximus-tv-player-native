@@ -71,16 +71,12 @@ class CatalogDatabase(context: Context) {
         offset: Int,
         seriesOnly: Boolean = false,
     ): List<CatalogEntry> {
+        if (seriesOnly) return querySeriesPage(group, search, hidden, sortAlphabetically, limit, offset)
         if (kind == null && favorites.isEmpty()) return emptyList()
         val db = helper.readableDatabase
         val where = mutableListOf<String>()
         val args = mutableListOf<String>()
-        if (seriesOnly) {
-            where += "kind=?"
-            args += MediaKind.SERIES.name
-        } else {
-            kind?.let { where += "kind=?"; args += it.name }
-        }
+        kind?.let { where += "kind=?"; args += it.name }
         if (group != "Todos") { where += "group_title=?"; args += group }
         if (search.isNotBlank()) {
             where += "(LOWER(name) LIKE ? OR LOWER(group_title) LIKE ? OR LOWER(tvg_id) LIKE ?)"
@@ -91,16 +87,46 @@ class CatalogDatabase(context: Context) {
         if (favorites.isNotEmpty()) where += "item_key IN (${favorites.joinToString(",") { "?" }})".also { args.addAll(favorites) }
         val selection = if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
         val order = if (sortAlphabetically) "name COLLATE NOCASE ASC" else "rowid ASC"
-        val sql = if (seriesOnly) {
-            "SELECT * FROM $TABLE $selection GROUP BY CASE WHEN TRIM(series_group) <> '' THEN series_group ELSE name END ORDER BY $order LIMIT $limit OFFSET $offset"
-        } else {
-            "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
-        }
+        val sql = "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) add(readEntry(cursor))
             }
         }
+    }
+
+    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
+        val db = helper.readableDatabase
+        val (outerFilter, outerArgs) = seriesFilter("candidate", group, search, hidden)
+        val (innerFilter, innerArgs) = seriesFilter("episode", group, search, hidden)
+        val outerIdentity = "CASE WHEN TRIM(candidate.series_group) <> '' THEN candidate.series_group ELSE candidate.name END"
+        val innerIdentity = "CASE WHEN TRIM(episode.series_group) <> '' THEN episode.series_group ELSE episode.name END"
+        val order = if (sortAlphabetically) "candidate.name COLLATE NOCASE ASC" else "candidate.rowid ASC"
+        val sql = "SELECT candidate.* FROM $TABLE candidate WHERE $outerFilter " +
+            "AND candidate.rowid = (SELECT episode.rowid FROM $TABLE episode WHERE $innerFilter " +
+            "AND $innerIdentity = $outerIdentity " +
+            "ORDER BY COALESCE(CAST(NULLIF(episode.season, '') AS INTEGER), 1), " +
+            "COALESCE(CAST(NULLIF(episode.episode, '') AS INTEGER), 0), episode.rowid LIMIT 1) " +
+            "ORDER BY $order LIMIT $limit OFFSET $offset"
+        val args = (outerArgs + innerArgs).toTypedArray()
+        return db.rawQuery(sql, args).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(readEntry(cursor))
+            }
+        }
+    }
+
+    private fun seriesFilter(alias: String, group: String, search: String, hidden: Set<String>): Pair<String, List<String>> {
+        val where = mutableListOf("$alias.kind=?")
+        val args = mutableListOf(MediaKind.SERIES.name)
+        if (group != "Todos") { where += "$alias.group_title=?"; args += group }
+        if (search.isNotBlank()) {
+            where += "(LOWER($alias.name) LIKE ? OR LOWER($alias.group_title) LIKE ? OR LOWER($alias.tvg_id) LIKE ? OR LOWER($alias.series_group) LIKE ?)"
+            val value = "%${search.trim().lowercase()}%"
+            args += value; args += value; args += value; args += value
+        }
+        if (hidden.isNotEmpty()) where += "UPPER($alias.group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
+        return where.joinToString(" AND ") to args
     }
 
     fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =

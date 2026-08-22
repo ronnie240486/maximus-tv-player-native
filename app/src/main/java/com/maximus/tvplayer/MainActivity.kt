@@ -22,7 +22,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -521,7 +524,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleEntryClick(entry: CatalogEntry) {
-        if (entry.kind == MediaKind.SERIES && entry.episode.isBlank() && !favoritesOnly) {
+        if (isSeriesRootEntry(entry)) {
             selectEntry(entry, true)
             showSeriesSeasonsDialog(entry)
             return
@@ -553,10 +556,8 @@ class MainActivity : Activity() {
         startMiniPlayer(entry, entry.streamUrl, entry.name)
     }
 
-    private fun hasActiveMiniPreview(entry: CatalogEntry): Boolean =
-        miniPlayerEntryKey == entry.key && (miniPlayer != null || miniTrailerView != null)
 
-    private fun startMiniPlayer(entry: CatalogEntry, sourceUrl: String = entry.streamUrl, previewTitle: String = entry.name) {
+    private fun startMiniPlayer(entry: CatalogEntry, sourceUrl: String = entry.streamUrl, previewTitle: String = entry.name, mode: PreviewMode = PreviewMode.CONTENT) {
         if (sourceUrl.isBlank()) {
             Toast.makeText(this, "Este item não possui uma transmissão válida", Toast.LENGTH_SHORT).show()
             return
@@ -577,7 +578,7 @@ class MainActivity : Activity() {
         miniPlayer = player
         miniPlayerView = playerView
         miniPlayerEntryKey = entry.key
-        previewMode = PreviewMode.CONTENT
+        previewMode = mode
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
         liveBadge.visibility = if (entry.kind == MediaKind.LIVE) View.VISIBLE else View.GONE
@@ -591,22 +592,65 @@ class MainActivity : Activity() {
         } else if (trailer.contains("youtube.com", true) || trailer.contains("youtu.be", true)) {
             startYoutubeTrailerPreview(entry, trailer)
         } else {
-            startMiniPlayer(entry, trailer, "Trailer • ${entry.name}")
+            startMiniPlayer(entry, trailer, "Trailer • ${entry.name}", PreviewMode.TRAILER)
         }
     }
 
     private fun startYoutubeTrailerSearchPreview(entry: CatalogEntry) {
         stopMiniPlayer()
         val query = Uri.encode("${entry.name} trailer oficial")
-        val webView = WebView(this).apply {
-            setBackgroundColor(Color.BLACK)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            isFocusable = false
-            layoutParams = FrameLayout.LayoutParams(-1, -1)
-            loadUrl("https://www.youtube.com/embed?listType=search&list=$query&autoplay=1&controls=1&playsinline=1&rel=0")
+        val webView = createYoutubeWebView()
+        var resolved = false
+        fun resolveFirstResult(view: WebView, attempt: Int) {
+            if (resolved) return
+            view.evaluateJavascript(
+                """(function(){var a=[...document.querySelectorAll('a')].map(function(x){return x.href||''}).find(function(h){return h.indexOf('/watch?v=')>=0});if(a)return a;var m=document.documentElement.innerHTML.match(/"videoId":"([A-Za-z0-9_-]{11})/);return m?m[1]:'';})()""",
+            ) { rawValue ->
+                val candidate = rawValue.trim().trim('"').replace("\\/", "/").replace("\\u0026", "&")
+                val videoId = youtubeVideoId(candidate) ?: candidate.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+                if (!resolved && videoId != null) {
+                    resolved = true
+                    view.alpha = 1f
+                    view.loadUrl(youtubeEmbedUrl(videoId))
+                } else if (attempt < 10) {
+                    view.postDelayed({ resolveFirstResult(view, attempt + 1) }, 700L)
+                }
+            }
         }
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                if (resolved || view == null || url?.contains("youtube", true) != true) return
+                view.postDelayed({ resolveFirstResult(view, 0) }, 1_200L)
+            }
+        }
+        webView.alpha = 0f
+        registerTrailerView(entry, webView)
+        webView.loadUrl("https://m.youtube.com/results?search_query=$query")
+    }
+
+    private fun createYoutubeWebView(): WebView = WebView(this).apply {
+        setBackgroundColor(Color.BLACK)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+        webChromeClient = WebChromeClient()
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.mediaPlaybackRequiresUserGesture = false
+        settings.setSupportMultipleWindows(false)
+        settings.allowContentAccess = true
+        settings.userAgentString = "Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+        isFocusable = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        layoutParams = FrameLayout.LayoutParams(-1, -1)
+    }
+
+    private fun youtubeEmbedUrl(videoId: String): String {
+        val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
+        return "https://www.youtube.com/embed/$safeId?autoplay=1&controls=1&playsinline=1&rel=0&modestbranding=1&fs=1"
+    }
+
+    private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
         videoPreview.addView(webView, 1)
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
@@ -616,6 +660,19 @@ class MainActivity : Activity() {
         liveBadge.visibility = View.VISIBLE
         liveBadge.text = "TRAILER"
         videoPreviewText.text = "Trailer no YouTube • ${entry.name}"
+    }
+
+    private fun startEmbeddedTrailerPreview(entry: CatalogEntry, url: String) {
+        val videoId = youtubeVideoId(url)
+        if (videoId.isNullOrBlank()) {
+            startYoutubeTrailerSearchPreview(entry)
+            return
+        }
+        stopMiniPlayer()
+        val webView = createYoutubeWebView()
+        webView.webViewClient = WebViewClient()
+        webView.loadUrl(youtubeEmbedUrl(videoId))
+        registerTrailerView(entry, webView)
     }
 
     private fun youtubeVideoId(value: String): String? {
@@ -635,25 +692,7 @@ class MainActivity : Activity() {
             startYoutubeTrailerSearchPreview(entry)
             return
         }
-        stopMiniPlayer()
-        val webView = WebView(this).apply {
-            setBackgroundColor(Color.BLACK)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            isFocusable = false
-            layoutParams = FrameLayout.LayoutParams(-1, -1)
-            loadUrl("https://www.youtube.com/embed/$videoId?autoplay=1&controls=1&playsinline=1&rel=0")
-        }
-        videoPreview.addView(webView, 1)
-        miniTrailerView = webView
-        miniPlayerEntryKey = entry.key
-        previewMode = PreviewMode.TRAILER
-        heroImage.visibility = View.GONE
-        previewLogo.visibility = View.GONE
-        liveBadge.visibility = View.VISIBLE
-        liveBadge.text = "TRAILER"
-        videoPreviewText.text = "Trailer • ${entry.name}"
+        startEmbeddedTrailerPreview(entry, "https://www.youtube-nocookie.com/embed/$videoId")
     }
 
     private fun expandMiniPlayer() {
@@ -704,9 +743,11 @@ class MainActivity : Activity() {
         val editorial = editorialFor(entry)
         val epgProgram = currentEpgProgram(entry)
         val isLive = entry.kind == MediaKind.LIVE
-        val hasTrailer = entry.trailerUrl.isNotBlank()
+        val isSeriesRoot = isSeriesRootEntry(entry)
+        val hasTrailer = !isSeriesRoot && (entry.trailerUrl.isNotBlank() || entry.kind == MediaKind.MOVIE)
         videoPreviewText.text = when {
             isLive -> "Preview • ${entry.name}"
+            isSeriesRoot -> "Série • ${seriesTitle(entry)}"
             hasTrailer -> "▶  Trailer • ${entry.name}"
             else -> "Poster • ${entry.name}"
         }
@@ -721,7 +762,7 @@ class MainActivity : Activity() {
         liveBadge.visibility = if (isLive || hasTrailer) View.VISIBLE else View.GONE
         liveBadge.text = if (isLive) "AO VIVO" else "TRAILER"
         detailEyebrow.text = if (isLive) editorial.eyebrow.uppercase() else kindLabel(entry.kind)
-        detailChannelName.text = entry.name
+        detailChannelName.text = if (isSeriesRoot) seriesTitle(entry) else entry.name
         detailTags.text = listOf(entry.groupTitle, entry.year, entry.quality, kindLabel(entry.kind), entry.runtime)
             .filter { it.isNotBlank() }.joinToString("   •   ")
         aboutLabel.text = if (isLive) "SOBRE O CANAL" else if (entry.kind == MediaKind.MOVIE) "SOBRE O FILME" else "SOBRE A SÉRIE"
@@ -739,7 +780,7 @@ class MainActivity : Activity() {
         else listOf(entry.year, entry.runtime).filter { it.isNotBlank() }.joinToString("  •  ").ifBlank { "Informações da lista do painel" }
         nextProgram.text = if (isLive) {
             nextEpgProgram(entry)?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
-        } else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
+        } else if (isSeriesRoot) "☷  Abrir temporadas" else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
         if (requestFocus) channelList.requestFocus()
         if (!databaseBackedCatalog) renderCatalog() else catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
@@ -749,7 +790,9 @@ class MainActivity : Activity() {
         actionRow.removeAllViews()
         val isFavorite = entry.key in favorites()
         val actions = mutableListOf<Pair<String, () -> Unit>>()
+        val isSeriesRoot = isSeriesRootEntry(entry)
         val primaryLabel = when {
+            isSeriesRoot -> "☷  ABRIR TEMPORADAS"
             entry.kind == MediaKind.MOVIE -> "▶  TRAILER NO YOUTUBE"
             entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> "▶  REPRODUZIR EPISÓDIO"
             else -> "▶  REPRODUZIR"
@@ -757,6 +800,7 @@ class MainActivity : Activity() {
         actions += primaryLabel to {
             val sameEntry = miniPlayerEntryKey == entry.key
             when {
+                isSeriesRoot -> showSeriesSeasonsDialog(entry)
                 sameEntry && previewMode == PreviewMode.TRAILER -> startContentPreview(entry)
                 sameEntry && previewMode == PreviewMode.CONTENT -> expandMiniPlayer()
                 entry.kind == MediaKind.MOVIE -> startTrailerPreview(entry)
@@ -764,7 +808,7 @@ class MainActivity : Activity() {
                 else -> startMiniPlayer(entry)
             }
         }
-        if (entry.kind == MediaKind.SERIES) {
+        if (entry.kind == MediaKind.SERIES && !isSeriesRoot) {
             actions += "☷  TEMPORADAS" to { showSeriesSeasonsDialog(entry) }
         }
         actions += (if (isFavorite) "♥  Favorito" else "♡  Favoritar") to {
@@ -984,6 +1028,9 @@ class MainActivity : Activity() {
     }
 
     private fun seriesTitle(entry: CatalogEntry): String = entry.seriesGroup.ifBlank { entry.name }
+
+    private fun isSeriesRootEntry(entry: CatalogEntry): Boolean =
+        entry.kind == MediaKind.SERIES && currentKind == MediaKind.SERIES && !favoritesOnly && seriesEpisodesDialog == null
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
