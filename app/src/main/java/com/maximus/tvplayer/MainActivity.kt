@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private lateinit var nowLabel: TextView
     private lateinit var currentProgram: TextView
     private lateinit var currentProgramDescription: TextView
+    private lateinit var epgUpcoming: LinearLayout
     private lateinit var programTime: TextView
     private lateinit var nextProgram: TextView
     private lateinit var actionRow: LinearLayout
@@ -221,6 +222,7 @@ class MainActivity : Activity() {
         nowLabel = findViewById(R.id.nowLabel)
         currentProgram = findViewById(R.id.currentProgram)
         currentProgramDescription = findViewById(R.id.currentProgramDescription)
+        epgUpcoming = findViewById(R.id.epgUpcoming)
         programTime = findViewById(R.id.programTime)
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
@@ -443,8 +445,11 @@ class MainActivity : Activity() {
         nowLabel.text = "DETALHES"
         currentProgram.text = ""
         currentProgramDescription.text = ""
+        epgUpcoming.removeAllViews()
+        epgUpcoming.visibility = View.GONE
         programTime.text = ""
         nextProgram.text = ""
+        nextProgram.visibility = View.GONE
         actionRow.removeAllViews()
     }
 
@@ -898,11 +903,42 @@ class MainActivity : Activity() {
         val content = (miniPlayerView ?: miniTrailerView) ?: return
         val player = miniPlayer
         (content.parent as? ViewGroup)?.removeView(content)
+        lateinit var dialog: Dialog
         val fullScreen = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(content, FrameLayout.LayoutParams(-1, -1))
         }
-        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+        val backButton = TextView(this).apply {
+            text = "VOLTAR"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            isFocusable = true
+            isClickable = true
+            setPadding(dp(16), 0, dp(16), 0)
+            elevation = dp(8).toFloat()
+            background = rounded(0xCC101827, 10f)
+        }
+        fullScreen.addView(backButton, FrameLayout.LayoutParams(-2, dp(48), Gravity.TOP or Gravity.END).apply {
+            setMargins(dp(24), dp(24), dp(24), 0)
+        })
+        val hideBackButton = Runnable { if (dialog.isShowing) backButton.visibility = View.GONE }
+        fun revealBackButton() {
+            backButton.visibility = View.VISIBLE
+            backButton.removeCallbacks(hideBackButton)
+            backButton.postDelayed(hideBackButton, 3_000L)
+        }
+        backButton.setOnClickListener { dialog.dismiss() }
+        backButton.setOnFocusChangeListener { view, hasFocus ->
+            view.background = rounded(if (hasFocus) 0xFF4CE8F0 else 0xCC101827, 10f)
+            (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
+        }
+        content.setOnTouchListener { _, _ ->
+            revealBackButton()
+            false
+        }
+        revealBackButton()
+        dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
             setContentView(fullScreen)
             setOnDismissListener {
                 (content.parent as? ViewGroup)?.removeView(content)
@@ -942,7 +978,8 @@ class MainActivity : Activity() {
         if (selectedEntry?.key != entry.key) stopMiniPlayer()
         selectedEntry = entry
         val editorial = editorialFor(entry)
-        val epgProgram = currentEpgProgram(entry)
+        val epgPrograms = epgProgramsFor(entry)
+        val epgProgram = currentEpgProgram(epgPrograms)
         val isLive = entry.kind == MediaKind.LIVE
         val isSeriesRoot = isSeriesRootEntry(entry)
         val hasTrailer = !isSeriesRoot && (entry.trailerUrl.isNotBlank() || entry.kind == MediaKind.MOVIE)
@@ -972,8 +1009,10 @@ class MainActivity : Activity() {
         currentProgram.text = if (isLive) epgProgram?.title ?: editorial.currentProgram else ""
         currentProgramDescription.text = if (isLive) epgProgram?.description?.ifBlank { null } ?: editorial.currentDescription else ""
         programTime.text = if (isLive) epgProgram?.let { "${formatTime(it.start)} – ${formatTime(it.stop)}" } ?: editorial.time else ""
+        renderUpcomingEpg(epgPrograms, epgProgram, isLive)
+        nextProgram.visibility = if (isLive && epgPrograms.isEmpty()) View.VISIBLE else View.GONE
         nextProgram.text = if (isLive) {
-            nextEpgProgram(entry)?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
+            epgPrograms.dropWhile { it !== epgProgram }.drop(1).firstOrNull()?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
         } else if (isSeriesRoot) "☷  Abrir temporadas" else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
         if (requestFocus) channelList.requestFocus()
@@ -1583,16 +1622,50 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun currentEpgProgram(entry: CatalogEntry): EpgProgram? {
-        val programs = epgByChannel[entry.tvgId].orEmpty()
+    private fun epgProgramsFor(entry: CatalogEntry): List<EpgProgram> = epgByChannel[entry.tvgId].orEmpty().sortedBy { it.start }
+
+    private fun currentEpgProgram(programs: List<EpgProgram>): EpgProgram? {
         if (programs.isEmpty()) return null
         val now = System.currentTimeMillis()
         return programs.firstOrNull { now in it.start..it.stop } ?: programs.firstOrNull { it.start > now }
     }
 
-    private fun nextEpgProgram(entry: CatalogEntry): EpgProgram? {
-        val now = System.currentTimeMillis()
-        return epgByChannel[entry.tvgId].orEmpty().firstOrNull { it.start > now }
+    private fun renderUpcomingEpg(programs: List<EpgProgram>, current: EpgProgram?, isLive: Boolean) {
+        epgUpcoming.removeAllViews()
+        if (!isLive || programs.isEmpty()) {
+            epgUpcoming.visibility = View.GONE
+            return
+        }
+        val anchorIndex = current?.let { programs.indexOf(it) } ?: -1
+        val upcoming = if (anchorIndex >= 0) programs.drop(anchorIndex + 1) else programs.filter { it.start > System.currentTimeMillis() }.drop(1)
+        upcoming.take(5).forEachIndexed { index, program ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(7), dp(8), dp(7))
+                background = rounded(if (index == 0) 0x223FE7EF else 0x14111629, 8f)
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(3), 0, 0) }
+            }
+            val label = TextView(this).apply {
+                text = if (index == 0) "A SEGUIR" else "DEPOIS"
+                setTextColor(if (index == 0) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                textSize = 9f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(dp(62), -2)
+            }
+            val title = TextView(this).apply {
+                text = "${formatTime(program.start)}  •  ${program.title}"
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            }
+            row.addView(label)
+            row.addView(title)
+            epgUpcoming.addView(row)
+        }
+        epgUpcoming.visibility = if (epgUpcoming.childCount > 0) View.VISIBLE else View.GONE
     }
 
     private fun formatTime(timestamp: Long): String = if (timestamp <= 0L) "--:--" else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))

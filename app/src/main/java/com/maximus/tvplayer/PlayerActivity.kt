@@ -22,6 +22,7 @@ class PlayerActivity : Activity() {
     private lateinit var playerView: PlayerView
     private lateinit var errorView: TextView
     private lateinit var scaleButton: TextView
+    private lateinit var backButton: TextView
     private var scaleMode = ScaleMode.NORMAL
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +39,17 @@ class PlayerActivity : Activity() {
         playerView = findViewById(R.id.playerView)
         errorView = findViewById(R.id.playerError)
         scaleButton = findViewById(R.id.playerScaleButton)
+        backButton = findViewById(R.id.playerBackButton)
+        backButton.setOnClickListener { finish() }
+        backButton.setOnFocusChangeListener { view, hasFocus ->
+            view.background = rounded(if (hasFocus) 0xFF4CE8F0.toInt() else 0xCC101827.toInt(), 10f)
+            (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
+        }
+        playerView.setOnTouchListener { _, _ ->
+            showBackButtonTemporarily()
+            false
+        }
+        showBackButtonTemporarily()
         scaleButton.background = rounded(0xCC101827.toInt(), 10f)
         scaleButton.setOnClickListener {
             scaleMode = when (scaleMode) {
@@ -77,6 +89,14 @@ class PlayerActivity : Activity() {
         }
     }
 
+    private fun showBackButtonTemporarily() {
+        backButton.visibility = View.VISIBLE
+        backButton.removeCallbacks(hideBackButton)
+        backButton.postDelayed(hideBackButton, 3_000L)
+    }
+
+    private val hideBackButton = Runnable { if (!isFinishing) backButton.visibility = View.GONE }
+
     private fun applyScale() {
         scaleButton.text = scaleMode.label
         playerView.resizeMode = when (scaleMode) {
@@ -97,6 +117,7 @@ class PlayerActivity : Activity() {
     }
 
     override fun onStop() {
+        backButton.removeCallbacks(hideBackButton)
         player?.release()
         player = null
         super.onStop()

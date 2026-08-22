@@ -30,6 +30,23 @@
         android:textStyle="bold" />
 
     <TextView
+        android:id="@+id/playerBackButton"
+        android:layout_width="wrap_content"
+        android:layout_height="46dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="24dp"
+        android:background="#CC101827"
+        android:focusable="true"
+        android:gravity="center"
+        android:minWidth="104dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:text="VOLTAR"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <TextView
         android:id="@+id/playerScaleButton"
         android:layout_width="wrap_content"
         android:layout_height="46dp"
