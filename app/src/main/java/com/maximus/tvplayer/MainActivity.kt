@@ -317,7 +317,11 @@ class MainActivity : Activity() {
         (findViewById<View>(R.id.navScroll) as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         previewScaleButton.visibility = View.GONE
         videoPreview.isFocusable = true
+        videoPreview.isFocusableInTouchMode = true
         videoPreview.isClickable = true
+        videoPreview.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+        previewScroll.isFocusable = false
+        previewScroll.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         videoPreview.setOnClickListener { selectedEntry?.let { handleEntryClick(it) } }
     }
 
@@ -454,14 +458,35 @@ class MainActivity : Activity() {
                 }
             }
             if (isWithin(focused, actionRow)) {
-                val index = actionRow.indexOfChild(focused)
+                val actionView = actionRow.indexOfChild(focused).takeIf { it >= 0 }
                 return when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusPreview()
                     KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusPreview()
-                    KeyEvent.KEYCODE_DPAD_DOWN -> focusAction(index + 1) || focusProgrammingArea()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusPreview() || true
+                    KeyEvent.KEYCODE_DPAD_DOWN -> actionView?.let { focusAction(it + 1) } ?: false || focusProgrammingArea() || true
                     else -> false
                 }
+            }
+            // Fallback for the ScrollView/preview container itself. Android TV can
+            // focus the container when a dynamic child is recreated; never let the
+            // default geometric algorithm send the user back to the sidebar.
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCategory() || true
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstAction() || focusProgrammingArea() || true
+                KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus() || true
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstAction() || focusProgrammingArea() || true
+                else -> false
+            }
+        }
+        if (isWithin(focused, findViewById(R.id.channelColumn))) {
+            // A column/header/RecyclerView wrapper may briefly own focus while
+            // rows are being rebound. Resolve directions to the content region.
+            return when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection() || true
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory() || true
+                KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus() || true
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCategory() || focusFirstCatalogItem() || true
+                else -> false
             }
         }
         return false
@@ -605,7 +630,14 @@ class MainActivity : Activity() {
         return null
     }
 
-    private fun focusPreview(): Boolean = if (previewScroll.visibility == View.VISIBLE) videoPreview.requestFocus() else false
+    private fun focusPreview(): Boolean {
+        if (previewScroll.visibility != View.VISIBLE || !videoPreview.isShown) return false
+        videoPreview.isFocusable = true
+        videoPreview.isFocusableInTouchMode = true
+        val focused = videoPreview.requestFocus()
+        if (!focused) videoPreview.post { videoPreview.requestFocus() }
+        return true
+    }
 
     private fun configureExplicitFocusGraph() {
         fun link(source: View?, left: View? = null, right: View? = null, up: View? = null, down: View? = null) {
@@ -678,7 +710,13 @@ class MainActivity : Activity() {
         link(nextProgram, left = lastAction, right = programmingTarget, up = nowCard ?: lastAction, down = nextProgram)
     }
 
-    private fun focusFirstAction(): Boolean = actionRow.getChildAt(0)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
+    private fun focusFirstAction(): Boolean {
+        val target = actionRow.getChildAt(0)?.takeIf { it.visibility == View.VISIBLE && it.isShown } ?: return false
+        target.isFocusable = true
+        val focused = target.requestFocus()
+        if (!focused) target.post { target.requestFocus() }
+        return true
+    }
 
     private fun focusLastAction(): Boolean {
         for (index in actionRow.childCount - 1 downTo 0) {
@@ -687,7 +725,13 @@ class MainActivity : Activity() {
         return false
     }
 
-    private fun focusAction(index: Int): Boolean = actionRow.getChildAt(index)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
+    private fun focusAction(index: Int): Boolean {
+        val target = actionRow.getChildAt(index)?.takeIf { it.visibility == View.VISIBLE && it.isShown } ?: return false
+        target.isFocusable = true
+        val focused = target.requestFocus()
+        if (!focused) target.post { target.requestFocus() }
+        return true
+    }
 
     private fun focusProgrammingArea(): Boolean {
         val target = when {
@@ -1385,6 +1429,9 @@ class MainActivity : Activity() {
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             isClickable = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
+            isFocusable = false
+            isFocusableInTouchMode = false
+            isClickable = false
         }
         videoPreview.addView(playerView, 1)
         if (radioMode && entry.kind == MediaKind.LIVE) {
