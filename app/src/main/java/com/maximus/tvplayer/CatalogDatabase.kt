@@ -162,6 +162,15 @@ class CatalogDatabase(context: Context) {
         }
     }
 
+    fun updateMetadata(key: String, metadata: CatalogMetadata) {
+        val values = ContentValues()
+        if (metadata.synopsis.isNotBlank()) values.put("synopsis", metadata.synopsis)
+        if (metadata.year.isNotBlank()) values.put("year", metadata.year)
+        if (metadata.backdrop.isNotBlank()) values.put("backdrop_url", metadata.backdrop)
+        if (metadata.trailer.isNotBlank()) values.put("trailer_url", metadata.trailer)
+        if (values.size() > 0) helper.writableDatabase.update(TABLE, values, "item_key=?", arrayOf(key))
+    }
+
     fun close() = helper.close()
 
     private fun hiddenClause(hidden: Set<String>, args: MutableList<String>): String {

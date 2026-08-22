@@ -1015,8 +1015,25 @@ class MainActivity : Activity() {
             epgPrograms.dropWhile { it !== epgProgram }.drop(1).firstOrNull()?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
         } else if (isSeriesRoot) "☷  Abrir temporadas" else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
         renderActions(entry)
+        if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) enrichEntryMetadata(entry)
         if (requestFocus) channelList.requestFocus()
         if (!databaseBackedCatalog) renderCatalog() else catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
+    }
+
+    private fun enrichEntryMetadata(entry: CatalogEntry) {
+        repository.enrichMetadata(entry) { metadata ->
+            if (metadata == null) return@enrichMetadata
+            runOnUiThread {
+                if (selectedEntry?.key != entry.key) return@runOnUiThread
+                if (metadata.synopsis.isNotBlank()) detailDescription.text = displaySynopsis(metadata.synopsis)
+                if (metadata.year.isNotBlank() || metadata.backdrop.isNotBlank()) {
+                    val parts = listOf(entry.groupTitle, metadata.year.ifBlank { entry.year }, entry.quality, kindLabel(entry.kind), entry.runtime)
+                        .filter { it.isNotBlank() }
+                    detailTags.text = parts.joinToString("   •   ")
+                    if (metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, heroImage, fallbackHero(entry))
+                }
+            }
+        }
     }
 
     private fun renderActions(entry: CatalogEntry) {

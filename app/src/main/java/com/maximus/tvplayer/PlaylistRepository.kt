@@ -1,6 +1,7 @@
 package com.maximus.tvplayer
 
 import android.content.Context
+import android.net.Uri
 import android.util.Base64
 import java.io.BufferedReader
 import java.io.File
@@ -10,8 +11,23 @@ import java.net.URL
 import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class CatalogMetadata(
+    val synopsis: String = "",
+    val year: String = "",
+    val backdrop: String = "",
+    val trailer: String = "",
+)
 
 class PlaylistRepository(private val context: Context) {
+
+    private data class XtreamSource(val baseUrl: String, val username: String, val password: String)
+
+    private var externalMetadataByKey: Map<String, CatalogMetadata> = emptyMap()
+    private var xtreamSource: XtreamSource? = null
+
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
@@ -51,6 +67,7 @@ class PlaylistRepository(private val context: Context) {
         executor.execute {
             callback(runCatching {
                 val normalized = normalizeUrls(urls)
+                xtreamSource = normalized.asSequence().mapNotNull(::parseXtreamSource).firstOrNull()
                 val stats = database.stats()
                 if (stats.total > 0 && !sourceChanged(normalized)) {
                     onProgress(100)
@@ -98,6 +115,18 @@ class PlaylistRepository(private val context: Context) {
         executor.execute { callback(runCatching { database.querySeriesEpisodes(seriesGroup, season, group, hidden) }.getOrDefault(emptyList())) }
     }
 
+    fun enrichMetadata(entry: CatalogEntry, callback: (CatalogMetadata?) -> Unit) {
+        externalMetadataByKey[entry.key]?.let { callback(it); return }
+        executor.execute {
+            val metadata = runCatching { fetchExternalMetadata(entry) }.getOrNull()
+            if (metadata != null && (metadata.synopsis.isNotBlank() || metadata.year.isNotBlank() || metadata.backdrop.isNotBlank() || metadata.trailer.isNotBlank())) {
+                externalMetadataByKey = externalMetadataByKey + (entry.key to metadata)
+                database.updateMetadata(entry.key, metadata)
+            }
+            callback(metadata)
+        }
+    }
+
     fun clearCache() {
         cacheFile.delete()
         database.clear()
@@ -108,6 +137,8 @@ class PlaylistRepository(private val context: Context) {
 
     private fun downloadAndCache(urls: List<String>, onProgress: (Int) -> Unit): CatalogSnapshot {
         val normalized = normalizeUrls(urls)
+        xtreamSource = normalized.asSequence().mapNotNull(::parseXtreamSource).firstOrNull()
+        externalMetadataByKey = emptyMap()
         val stats = database.replaceStreaming({ emit -> streamUrls(normalized, emit) }, onProgress)
         if (stats.total == 0) error("A lista do painel está vazia ou indisponível")
         onProgress(100)
@@ -116,6 +147,92 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+
+    private fun parseXtreamSource(value: String): XtreamSource? = runCatching {
+        val uri = Uri.parse(value)
+        val username = uri.getQueryParameter("username").orEmpty()
+        val password = uri.getQueryParameter("password").orEmpty()
+        if (uri.scheme.isNullOrBlank() || uri.host.isNullOrBlank() || username.isBlank() || password.isBlank()) return@runCatching null
+        XtreamSource("${uri.scheme}://${uri.authority}".trimEnd('/'), username, password)
+    }.getOrNull()
+
+    private fun fetchExternalMetadata(entry: CatalogEntry): CatalogMetadata? {
+        val source = xtreamSource ?: parseXtreamSource(entry.streamUrl) ?: return null
+        val directId = if (entry.kind == MediaKind.SERIES) {
+            entry.tvgId.filter(Char::isDigit).ifBlank { extractProviderId(entry.streamUrl) }
+        } else {
+            extractProviderId(entry.streamUrl).ifBlank { entry.tvgId.filter(Char::isDigit) }
+        }
+        val providerId = directId.ifBlank { resolveProviderId(source, entry) }
+        if (providerId.isBlank()) return null
+        val action = if (entry.kind == MediaKind.SERIES) "get_series_info" else "get_vod_info"
+        val parameter = if (entry.kind == MediaKind.SERIES) "series_id" else "vod_id"
+        val root = requestJson(xtreamEndpoint(source, action, parameter, providerId)) ?: return null
+        val info = root.optJSONObject("info") ?: root.optJSONObject("data")?.optJSONObject("info") ?: root.optJSONObject("data") ?: root
+        return CatalogMetadata(
+            synopsis = firstJsonText(info, "plot", "description", "desc", "synopsis", "overview", "summary"),
+            year = firstJsonText(info, "releaseDate", "release_date", "year"),
+            backdrop = firstJsonText(info, "backdrop_path", "backdrop", "fanart", "cover_big", "cover"),
+            trailer = firstJsonText(info, "youtube_trailer", "youtube-trailer", "trailer", "trailer_url"),
+        )
+    }
+
+    private fun extractProviderId(streamUrl: String): String = runCatching {
+        Uri.parse(streamUrl).pathSegments.asReversed().firstOrNull { segment -> segment.substringBeforeLast('.').all(Char::isDigit) }.orEmpty()
+    }.getOrDefault("")
+
+    private fun resolveProviderId(source: XtreamSource, entry: CatalogEntry): String {
+        val action = if (entry.kind == MediaKind.SERIES) "get_series" else "get_vod_streams"
+        val root = requestJson(xtreamEndpoint(source, action)) ?: return ""
+        val array = if (entry.kind == MediaKind.SERIES) root.optJSONArray("series") else root.optJSONArray("vod_streams")
+        val wanted = normalizeMetadataName(if (entry.kind == MediaKind.SERIES) entry.seriesGroup.ifBlank { entry.name } else entry.name)
+        val item = (0 until (array?.length() ?: 0)).asSequence()
+            .mapNotNull { array?.optJSONObject(it) }
+            .firstOrNull { normalizeMetadataName(it.optString("name")) == wanted }
+            ?: (0 until (array?.length() ?: 0)).asSequence()
+                .mapNotNull { array?.optJSONObject(it) }
+                .firstOrNull { val candidate = normalizeMetadataName(it.optString("name")); candidate.contains(wanted) || wanted.contains(candidate) }
+        return item?.optString(if (entry.kind == MediaKind.SERIES) "series_id" else "stream_id").orEmpty()
+    }
+
+    private fun xtreamEndpoint(source: XtreamSource, action: String, parameter: String? = null, value: String? = null): String {
+        val builder = Uri.parse("${source.baseUrl}/player_api.php").buildUpon()
+            .appendQueryParameter("username", source.username)
+            .appendQueryParameter("password", source.password)
+            .appendQueryParameter("action", action)
+        if (!parameter.isNullOrBlank() && !value.isNullOrBlank()) builder.appendQueryParameter(parameter, value)
+        return builder.build().toString()
+    }
+
+    private fun normalizeMetadataName(value: String): String = value
+        .lowercase()
+        .replace(Regex("\\s*(?:s\\s*\\d{1,2}\\s*e(?:p)?\\s*\\d{1,4}|temporada\\s*\\d{1,2}|season\\s*\\d{1,2}).*$"), "")
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .trim()
+
+    private fun requestJson(endpoint: String): JSONObject? = runCatching {
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 20_000
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
+        }
+        val status = connection.responseCode
+        val body = (if (status in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+        connection.disconnect()
+        if (status !in 200..299 || body.isBlank()) null else JSONObject(body)
+    }.getOrNull()
+
+    private fun firstJsonText(json: JSONObject, vararg keys: String): String {
+        keys.forEach { key ->
+            val value = json.opt(key)
+            when (value) {
+                is JSONArray -> if (value.length() > 0) return value.optString(0).trim()
+                else -> value?.toString()?.trim()?.takeIf { it.isNotBlank() && it != "null" }?.let { return it }
+            }
+        }
+        return ""
+    }
 
     private fun sourceChanged(urls: List<String>): Boolean {
         if (metadata.getInt("format_version", 0) != 8) return true
