@@ -575,9 +575,11 @@ class MainActivity : Activity() {
             useController = false
             controllerShowTimeoutMs = 0
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            isClickable = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
         videoPreview.addView(playerView, 1)
+        playerView.setOnClickListener { handleEntryClick(entry) }
         val player = ExoPlayer.Builder(this).build()
         playerView.player = player
         player.setMediaItem(MediaItem.fromUri(sourceUrl))
@@ -619,7 +621,7 @@ class MainActivity : Activity() {
                 if (!resolved && videoId != null) {
                     resolved = true
                     view.alpha = 1f
-                    loadYoutubeEmbed(view, videoId)
+                    loadYoutubeVideoPage(view, videoId)
                 } else if (attempt < 10) {
                     view.postDelayed({ resolveFirstResult(view, attempt + 1) }, 700L)
                 }
@@ -646,23 +648,25 @@ class MainActivity : Activity() {
         settings.mediaPlaybackRequiresUserGesture = false
         settings.setSupportMultipleWindows(false)
         settings.allowContentAccess = true
-        settings.userAgentString = "Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+        settings.userAgentString = "Mozilla/5.0 (Linux; Android 12; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         isFocusable = false
         overScrollMode = View.OVER_SCROLL_NEVER
         setLayerType(View.LAYER_TYPE_HARDWARE, null)
         layoutParams = FrameLayout.LayoutParams(-1, -1)
     }
 
-    private fun youtubeEmbedUrl(videoId: String): String {
+    private fun youtubeVideoPageUrl(videoId: String): String {
         val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        return "https://www.youtube.com/embed/$safeId?autoplay=1&controls=1&playsinline=1&rel=0&modestbranding=1&fs=1&enablejsapi=1&origin=https%3A%2F%2Fwww.youtube.com"
+        return "https://m.youtube.com/watch?v=$safeId&autoplay=1&playsinline=1"
     }
 
-    private fun loadYoutubeEmbed(webView: WebView, videoId: String) {
-        webView.loadUrl(youtubeEmbedUrl(videoId), mapOf("Referer" to "https://www.youtube.com/"))
+    private fun loadYoutubeVideoPage(webView: WebView, videoId: String) {
+        webView.loadUrl(youtubeVideoPageUrl(videoId), mapOf("Referer" to "https://m.youtube.com/"))
     }
 
     private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
+        webView.isClickable = true
+        webView.setOnClickListener { handleEntryClick(entry) }
         videoPreview.addView(webView, 1)
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
@@ -683,7 +687,7 @@ class MainActivity : Activity() {
         stopMiniPlayer()
         val webView = createYoutubeWebView()
         webView.webViewClient = WebViewClient()
-        loadYoutubeEmbed(webView, videoId)
+        loadYoutubeVideoPage(webView, videoId)
         registerTrailerView(entry, webView)
     }
 

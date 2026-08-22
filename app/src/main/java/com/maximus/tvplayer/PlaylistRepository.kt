@@ -117,7 +117,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
-        if (metadata.getInt("format_version", 0) != 5) return true
+        if (metadata.getInt("format_version", 0) != 6) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -128,7 +128,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 5).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 6).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -336,7 +336,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun cleanDisplayName(value: String): String = value
-        .replace(Regex("\\s+[\\\"']?(?:tvg-logo|group-title|tvg-id|tvg-name|tvg-type|tvg-chno|group)\\s*=.*$", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("[\\\"']?\\s*(?:tvg-logo|group-title|tvg-id|tvg-name|tvg-type|tvg-chno|group)\\s*=.*$", RegexOption.IGNORE_CASE), "")
         .trim()
         .replace(Regex("^[\\\"']+|[\\\"']+$"), "")
         .replace(Regex("\\s{2,}"), " ")
