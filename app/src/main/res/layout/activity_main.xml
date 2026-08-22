@@ -79,16 +79,6 @@
                     android:orientation="vertical" />
             </ScrollView>
 
-            <TextView
-                android:id="@+id/profileInitial"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="@drawable/tv_banner"
-                android:gravity="center"
-                android:text="U"
-                android:textColor="@color/white"
-                android:textSize="16sp"
-                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
