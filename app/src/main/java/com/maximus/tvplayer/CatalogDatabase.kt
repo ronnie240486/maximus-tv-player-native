@@ -97,22 +97,26 @@ class CatalogDatabase(context: Context) {
 
     private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
         val db = helper.readableDatabase
-        val (outerFilter, outerArgs) = seriesFilter("candidate", group, search, hidden)
-        val (innerFilter, innerArgs) = seriesFilter("episode", group, search, hidden)
-        val outerIdentity = "CASE WHEN TRIM(candidate.series_group) <> '' THEN candidate.series_group ELSE candidate.name END"
-        val innerIdentity = "CASE WHEN TRIM(episode.series_group) <> '' THEN episode.series_group ELSE episode.name END"
-        val order = if (sortAlphabetically) "candidate.name COLLATE NOCASE ASC" else "candidate.rowid ASC"
-        val sql = "SELECT candidate.* FROM $TABLE candidate WHERE $outerFilter " +
-            "AND candidate.rowid = (SELECT episode.rowid FROM $TABLE episode WHERE $innerFilter " +
-            "AND $innerIdentity = $outerIdentity " +
-            "ORDER BY COALESCE(CAST(NULLIF(episode.season, '') AS INTEGER), 1), " +
-            "COALESCE(CAST(NULLIF(episode.episode, '') AS INTEGER), 0), episode.rowid LIMIT 1) " +
-            "ORDER BY $order LIMIT $limit OFFSET $offset"
-        val args = (outerArgs + innerArgs).toTypedArray()
-        return db.rawQuery(sql, args).use { cursor ->
+        val (filter, baseArgs) = seriesFilter("item", group, search, hidden)
+        val identity = "CASE WHEN TRIM(item.series_group) <> '' THEN item.series_group ELSE item.name END"
+        val identityOrder = if (sortAlphabetically) "series_identity COLLATE NOCASE ASC" else "MIN(source_rowid) ASC"
+        val identitySql = "SELECT series_identity FROM (" +
+            "SELECT $identity AS series_identity, item.rowid AS source_rowid FROM $TABLE item WHERE $filter" +
+            ") GROUP BY series_identity ORDER BY $identityOrder LIMIT $limit OFFSET $offset"
+        val identities = db.rawQuery(identitySql, baseArgs.toTypedArray()).use { cursor ->
             buildList {
-                while (cursor.moveToNext()) add(readEntry(cursor))
+                while (cursor.moveToNext()) cursor.getString(0)?.takeIf { it.isNotBlank() }?.let { add(it) }
             }
+        }
+        return identities.mapNotNull { seriesIdentity ->
+            val detailFilter = "$filter AND $identity=?"
+            val detailArgs = (baseArgs + seriesIdentity).toTypedArray()
+            db.rawQuery(
+                "SELECT * FROM $TABLE item WHERE $detailFilter " +
+                    "ORDER BY COALESCE(CAST(NULLIF(item.season, '') AS INTEGER), 1), " +
+                    "COALESCE(CAST(NULLIF(item.episode, '') AS INTEGER), 0), item.rowid LIMIT 1",
+                detailArgs,
+            ).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
         }
     }
 

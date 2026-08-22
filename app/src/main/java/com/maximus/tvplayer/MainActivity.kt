@@ -77,6 +77,7 @@ class MainActivity : Activity() {
     private lateinit var programTime: TextView
     private lateinit var nextProgram: TextView
     private lateinit var actionRow: LinearLayout
+    private lateinit var vodSection: View
     private lateinit var vodCards: LinearLayout
     private lateinit var vodTitle: TextView
     private lateinit var homePanel: ScrollView
@@ -219,6 +220,8 @@ class MainActivity : Activity() {
         programTime = findViewById(R.id.programTime)
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
+        vodSection = findViewById(R.id.vodSection)
+        vodSection.visibility = View.GONE
         vodCards = findViewById(R.id.vodCards)
         vodTitle = findViewById(R.id.vodTitle)
         homePanel = findViewById(R.id.homePanel)
@@ -357,16 +360,62 @@ class MainActivity : Activity() {
         homeHeroDescription.text = "Conteúdos selecionados para você assistir com qualidade e praticidade."
     }
 
+    private fun clearPreviewForSection(kind: MediaKind) {
+        heroImage.setImageResource(R.drawable.excellence_main_background_3d)
+        previewLogo.visibility = View.GONE
+        liveBadge.visibility = View.GONE
+        videoPreviewText.text = when (kind) {
+            MediaKind.LIVE -> "Selecione um canal para ver o preview"
+            MediaKind.MOVIE -> "Selecione um filme para ver o trailer"
+            MediaKind.SERIES -> "Selecione uma série para ver as temporadas"
+        }
+        detailEyebrow.text = when (kind) {
+            MediaKind.LIVE -> "CANAIS AO VIVO"
+            MediaKind.MOVIE -> "FILMES"
+            MediaKind.SERIES -> "SÉRIES"
+        }
+        detailChannelName.text = when (kind) {
+            MediaKind.LIVE -> "Nenhum canal selecionado"
+            MediaKind.MOVIE -> "Nenhum filme selecionado"
+            MediaKind.SERIES -> "Nenhuma série selecionada"
+        }
+        detailTags.text = ""
+        aboutLabel.text = when (kind) {
+            MediaKind.LIVE -> "SOBRE O CANAL"
+            MediaKind.MOVIE -> "SOBRE O FILME"
+            MediaKind.SERIES -> "SOBRE A SÉRIE"
+        }
+        detailDescription.text = when (kind) {
+            MediaKind.LIVE -> "Selecione um canal para visualizar os detalhes."
+            MediaKind.MOVIE -> "Selecione um filme para visualizar o trailer e os detalhes."
+            MediaKind.SERIES -> "Nenhuma série foi encontrada nesta lista do painel."
+        }
+        nowLabel.text = "DETALHES"
+        currentProgram.text = ""
+        currentProgramDescription.text = ""
+        programTime.text = ""
+        nextProgram.text = ""
+        actionRow.removeAllViews()
+    }
+
     private fun switchSection(kind: MediaKind) {
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
         stopMiniPlayer()
         selectedEntry = null
+        clearPreviewForSection(kind)
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
         findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
+        vodSection.visibility = if (kind == MediaKind.MOVIE) View.VISIBLE else View.GONE
+        if (kind == MediaKind.MOVIE) {
+            vodTitle.text = "CATEGORIAS DE FILMES (VOD)"
+            renderVodStrip()
+        } else {
+            vodCards.removeAllViews()
+        }
         favoritesOnly = false
         currentKind = kind
         categoryRequestId++
@@ -394,6 +443,9 @@ class MainActivity : Activity() {
         seriesSeasonsDialog?.dismiss()
         stopMiniPlayer()
         selectedEntry = null
+        clearPreviewForSection(MediaKind.LIVE)
+        vodSection.visibility = View.GONE
+        vodCards.removeAllViews()
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
@@ -494,7 +546,10 @@ class MainActivity : Activity() {
                 pageLoading = false
                 if (page.isEmpty()) {
                     pageFinished = true
-                    if (offset == 0) selectedEntry = null
+                    if (offset == 0) {
+                        selectedEntry = null
+                        clearPreviewForSection(currentKind)
+                    }
                     return@runOnUiThread
                 }
                 pagedItems.addAll(page)
