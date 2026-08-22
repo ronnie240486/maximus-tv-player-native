@@ -336,13 +336,8 @@ class MainActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
-                -> {
-                    val focused = currentFocus
-                    if (focused != null && focused.isShown && focused.isEnabled && focused.isClickable) {
-                        focused.performClick()
-                        return true
-                    }
-                }
+                KeyEvent.KEYCODE_BUTTON_A,
+                -> if (activateDpadTarget()) return true
                 KeyEvent.KEYCODE_BACK -> {
                     onBackPressed()
                     return true
@@ -352,8 +347,39 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private fun moveDpad(keyCode: Int): Boolean {
+    private fun activateDpadTarget(): Boolean {
         val focused = currentFocus ?: return false
+        val sideNavigation = findViewById<View>(R.id.sideNavigation)
+        val categoryParent = categoryList.parent as? View
+        val target = when {
+            navigationRowForFocus(focused) != null -> navigationRowForFocus(focused)
+            focused === searchHint -> searchHint
+            catalogRowForFocus(focused) != null -> catalogRowForFocus(focused)
+            isWithin(focused, channelList) -> channelList.getChildAt(0)
+            focused === categoryParent -> categoryList.getChildAt(0)
+            isWithin(focused, categoryList) -> focused
+            isWithin(focused, actionRow) -> {
+                var current: View? = focused
+                while (current != null && current.parent !== actionRow) current = current.parent as? View
+                current ?: actionRow.getChildAt(0)
+            }
+            isWithin(focused, videoPreview) -> videoPreview
+            focused === previewScroll -> videoPreview
+            isWithin(focused, sideNavigation) -> focused.takeIf { it.isClickable }
+            else -> focused.takeIf { it.isClickable }
+        } ?: return false
+        if (!target.isShown || !target.isEnabled || !target.isClickable) return false
+        target.performClick()
+        return true
+    }
+
+    private fun moveDpad(keyCode: Int): Boolean {
+        val focused = currentFocus ?: return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory()
+            KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCategory() || focusFirstCatalogItem()
+            KeyEvent.KEYCODE_DPAD_LEFT -> true
+            else -> false
+        }
         if (homeMode) return moveHomeDpad(focused, keyCode)
 
         if (focused === searchHint) {
