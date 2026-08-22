@@ -46,8 +46,11 @@ class PlayerActivity : Activity() {
             view.background = rounded(if (hasFocus) 0xFF4CE8F0.toInt() else 0xCC101827.toInt(), 10f)
             (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
         }
-        playerView.setOnTouchListener { _, _ ->
-            showBackButtonTemporarily()
+        playerView.setOnTouchListener { _, event ->
+            if (event.action == android.view.MotionEvent.ACTION_UP) {
+                playerView.showController()
+                showBackButtonTemporarily()
+            }
             false
         }
         showBackButtonTemporarily()
@@ -64,7 +67,10 @@ class PlayerActivity : Activity() {
             view.background = rounded(if (hasFocus) 0xFF4CE8F0.toInt() else 0xCC101827.toInt(), 10f)
             (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
         }
-        backButton.post { backButton.requestFocus() }
+        playerView.post {
+            playerView.requestFocus()
+            playerView.showController()
+        }
         applyScale()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val streamUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
@@ -115,6 +121,12 @@ class PlayerActivity : Activity() {
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
                     val focused = currentFocus
+                    if (focused === playerView) {
+                        if (player?.isPlaying == true) player?.pause() else player?.play()
+                        playerView.showController()
+                        showBackButtonTemporarily()
+                        return true
+                    }
                     if (focused != null && focused.isShown && focused.isEnabled && focused.isClickable) {
                         focused.performClick()
                         return true

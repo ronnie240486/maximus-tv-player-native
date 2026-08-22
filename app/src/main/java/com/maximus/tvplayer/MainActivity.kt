@@ -1161,6 +1161,10 @@ class MainActivity : Activity() {
             return
         }
         startMiniPlayer(entry, entry.streamUrl, entry.name)
+        // O segundo clique é o comando de reprodução: abrir imediatamente em tela cheia.
+        videoPreview.post {
+            if (miniPlayerEntryKey == entry.key && previewMode == PreviewMode.CONTENT) expandMiniPlayer()
+        }
     }
 
 
@@ -1376,6 +1380,8 @@ class MainActivity : Activity() {
     private fun expandMiniPlayer() {
         val content = (miniPlayerView ?: miniTrailerView) ?: return
         val player = miniPlayer
+        val playerView = content as? PlayerView
+        val expandedEntry = selectedEntry
         (content.parent as? ViewGroup)?.removeView(content)
         lateinit var dialog: Dialog
         val fullScreen = FrameLayout(this).apply {
@@ -1407,21 +1413,73 @@ class MainActivity : Activity() {
             view.background = rounded(if (hasFocus) 0xFF4CE8F0 else 0xCC101827, 10f)
             (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
         }
-        content.setOnTouchListener { _, _ ->
-            revealBackButton()
-            false
+        if (playerView != null) {
+            playerView.useController = true
+            playerView.controllerShowTimeoutMs = 4_000
+            playerView.isFocusable = true
+            playerView.setOnClickListener {
+                playerView.showController()
+                revealBackButton()
+            }
+            playerView.setOnKeyListener { _, keyCode, event ->
+                if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER,
+                    -> {
+                        if (player?.isPlaying == true) player.pause() else player?.play()
+                        playerView.showController()
+                        revealBackButton()
+                        true
+                    }
+                    KeyEvent.KEYCODE_BACK -> {
+                        dialog.dismiss()
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT,
+                    KeyEvent.KEYCODE_DPAD_UP,
+                    -> backButton.requestFocus()
+                    else -> false
+                }
+            }
+        } else {
+            content.setOnTouchListener { _, _ ->
+                revealBackButton()
+                false
+            }
         }
         revealBackButton()
         dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
             setContentView(fullScreen)
             setOnDismissListener {
                 (content.parent as? ViewGroup)?.removeView(content)
+                if (playerView != null) {
+                    playerView.useController = false
+                    playerView.setOnKeyListener(null)
+                    playerView.setOnClickListener { expandedEntry?.let { handleEntryClick(it) } }
+                }
                 videoPreview.addView(content, 1)
                 miniPlayerDialog = null
             }
         }
         miniPlayerDialog = dialog
         dialog.show()
+        dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        dialog.window?.decorView?.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        if (playerView != null) {
+            playerView.showController()
+            playerView.requestFocus()
+        } else {
+            backButton.requestFocus()
+        }
         player?.playWhenReady = true
     }
 
