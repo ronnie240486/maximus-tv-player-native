@@ -313,6 +313,8 @@ class MainActivity : Activity() {
         searchHint.setOnClickListener { showSearchDialog() }
         (categoryList.parent as? View)?.isFocusable = false
         (categoryList.parent as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        findViewById<View>(R.id.navScroll).isFocusable = false
+        (findViewById<View>(R.id.navScroll) as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         previewScaleButton.visibility = View.GONE
         videoPreview.isFocusable = true
         videoPreview.isClickable = true
@@ -354,17 +356,22 @@ class MainActivity : Activity() {
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
                 KeyEvent.KEYCODE_DPAD_UP -> focusNavigationForCurrentSection()
-                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCategory() || focusFirstCatalogItem()
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCategory()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory()
                 else -> false
             }
         }
-        if (isWithin(focused, navItems)) {
-            val index = navItems.indexOfChild(focused)
+        val focusedNavRow = navigationRowForFocus(focused)
+        if (focusedNavRow != null || isWithin(focused, findViewById(R.id.sideNavigation))) {
+            val index = focusedNavRow?.let { navItems.indexOfChild(it) } ?: navItems.indexOfChild(
+                (0 until navItems.childCount)
+                    .map { navItems.getChildAt(it) }
+                    .firstOrNull { isNavigationSelected(it.tag as? String ?: "") },
+            ).coerceAtLeast(0)
             return when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP -> focusNavigation(index - 1)
-                KeyEvent.KEYCODE_DPAD_DOWN -> focusNavigation(index + 1)
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory() || focusFirstCatalogItem() || focusPreview()
+                KeyEvent.KEYCODE_DPAD_UP -> if (focusedNavRow != null) focusNavigation(index - 1) else true
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (focusedNavRow != null) focusNavigation(index + 1) else focusNavigation(index)
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory()
                 KeyEvent.KEYCODE_DPAD_LEFT -> true
                 else -> false
             }
@@ -372,7 +379,7 @@ class MainActivity : Activity() {
         if (focused === categoryList.parent) {
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCatalogItem()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory()
                 KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstCatalogItem()
                 else -> false
@@ -402,8 +409,8 @@ class MainActivity : Activity() {
             val row = catalogRowForFocus(focused)
             val position = row?.let { channelList.getChildAdapterPosition(it) } ?: RecyclerView.NO_POSITION
             return when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> focusNavigationForCurrentSection()
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview()
+                KeyEvent.KEYCODE_DPAD_LEFT -> focusFirstCategory() || focusNavigationForCurrentSection()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview() || focusFirstAction()
                 KeyEvent.KEYCODE_DPAD_UP -> if (position <= 0) focusFirstCategory() || searchHint.requestFocus() else moveCatalogFocus(-1)
                 KeyEvent.KEYCODE_DPAD_DOWN -> moveCatalogFocus(1)
                 else -> false
@@ -412,31 +419,35 @@ class MainActivity : Activity() {
         if (isWithin(focused, previewScroll)) {
             if (isWithin(focused, nowCard)) {
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusLastAction() || videoPreview.requestFocus()
                     KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> true
                     KeyEvent.KEYCODE_DPAD_DOWN -> focusNextProgram() || true
                     else -> false
                 }
             }
             if (isWithin(focused, nextProgram)) {
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusLastAction() || nowCard.requestFocus()
                     KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || nowCard.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> true
                     KeyEvent.KEYCODE_DPAD_DOWN -> true
                     else -> false
                 }
             }
             if (focused === detailDescription) {
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusLastAction() || videoPreview.requestFocus()
                     KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> true
                     KeyEvent.KEYCODE_DPAD_DOWN -> focusProgrammingArea() || true
                     else -> false
                 }
             }
             if (isWithin(focused, videoPreview)) {
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCategory()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstAction() || focusProgrammingArea()
                     KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
                     KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstAction() || previewScaleButton.requestFocus()
                     else -> false
@@ -445,7 +456,7 @@ class MainActivity : Activity() {
             if (isWithin(focused, actionRow)) {
                 val index = actionRow.indexOfChild(focused)
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCatalogItem()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> focusPreview()
                     KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
                     KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusPreview()
                     KeyEvent.KEYCODE_DPAD_DOWN -> focusAction(index + 1) || focusProgrammingArea()
@@ -498,12 +509,25 @@ class MainActivity : Activity() {
         return true
     }
 
+    private fun navigationRowForFocus(view: View?): View? {
+        var current = view
+        while (current != null && current.parent !== navItems) {
+            current = current.parent as? View
+        }
+        return current?.takeIf { it.parent === navItems }
+    }
+
     private fun focusNavigationForCurrentSection(): Boolean {
         val target = (0 until navItems.childCount)
             .map { navItems.getChildAt(it) }
             .firstOrNull { isNavigationSelected(it.tag as? String ?: "") }
             ?: navItems.getChildAt(0)
-        return target?.requestFocus() == true
+            ?: return false
+        target.isFocusable = true
+        val focused = target.requestFocus()
+        if (!focused) target.post { target.requestFocus() }
+        updateNavigationVisuals(target)
+        return true
     }
 
     private fun focusFirstCategory(): Boolean {
@@ -582,6 +606,77 @@ class MainActivity : Activity() {
     }
 
     private fun focusPreview(): Boolean = if (previewScroll.visibility == View.VISIBLE) videoPreview.requestFocus() else false
+
+    private fun configureExplicitFocusGraph() {
+        fun link(source: View?, left: View? = null, right: View? = null, up: View? = null, down: View? = null) {
+            if (source == null || source.id == View.NO_ID) return
+            left?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusLeftId = it.id }
+            right?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusRightId = it.id }
+            up?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusUpId = it.id }
+            down?.takeIf { it.id != View.NO_ID }?.let { source.nextFocusDownId = it.id }
+        }
+
+        val selectedNav = (0 until navItems.childCount)
+            .map { navItems.getChildAt(it) }
+            .firstOrNull { isNavigationSelected(it.tag as? String ?: "") }
+            ?: navItems.getChildAt(0)
+        val firstCategory = categoryList.getChildAt(0)
+        val lastCategory = categoryList.getChildAt(categoryList.childCount - 1)
+        val firstCatalog = channelList.getChildAt(0)
+        val firstAction = actionRow.getChildAt(0)
+        val lastAction = actionRow.getChildAt(actionRow.childCount - 1)
+        val programmingTarget = when {
+            nowCard.visibility == View.VISIBLE && nowCard.isShown -> nowCard
+            nextProgram.visibility == View.VISIBLE && nextProgram.text.isNotBlank() -> nextProgram
+            detailDescription.visibility == View.VISIBLE && detailDescription.text.isNotBlank() -> detailDescription
+            else -> null
+        }
+
+        for (index in 0 until navItems.childCount) {
+            val row = navItems.getChildAt(index)
+            link(
+                row,
+                left = if (index > 0) navItems.getChildAt(index - 1) else null,
+                right = firstCategory,
+                up = if (index > 0) navItems.getChildAt(index - 1) else row,
+                down = if (index < navItems.childCount - 1) navItems.getChildAt(index + 1) else row,
+            )
+        }
+        for (index in 0 until categoryList.childCount) {
+            val category = categoryList.getChildAt(index)
+            link(
+                category,
+                left = if (index > 0) categoryList.getChildAt(index - 1) else selectedNav,
+                right = if (index < categoryList.childCount - 1) categoryList.getChildAt(index + 1) else firstCatalog,
+                up = searchHint,
+                down = firstCatalog,
+            )
+        }
+        for (index in 0 until channelList.childCount) {
+            val row = channelList.getChildAt(index)
+            link(
+                row,
+                left = firstCategory,
+                right = videoPreview,
+                up = if (index > 0) channelList.getChildAt(index - 1) else firstCategory,
+                down = if (index < channelList.childCount - 1) channelList.getChildAt(index + 1) else firstAction,
+            )
+        }
+        link(videoPreview, left = firstCatalog ?: firstCategory, right = firstAction, up = searchHint, down = firstAction)
+        for (index in 0 until actionRow.childCount) {
+            val action = actionRow.getChildAt(index)
+            link(
+                action,
+                left = videoPreview,
+                right = programmingTarget,
+                up = if (index > 0) actionRow.getChildAt(index - 1) else videoPreview,
+                down = if (index < actionRow.childCount - 1) actionRow.getChildAt(index + 1) else programmingTarget,
+            )
+        }
+        link(detailDescription, left = lastAction, right = programmingTarget, up = lastAction ?: videoPreview, down = programmingTarget)
+        link(nowCard, left = lastAction, right = programmingTarget, up = lastAction ?: videoPreview, down = nextProgram ?: detailDescription)
+        link(nextProgram, left = lastAction, right = programmingTarget, up = nowCard ?: lastAction, down = nextProgram)
+    }
 
     private fun focusFirstAction(): Boolean = actionRow.getChildAt(0)?.takeIf { it.visibility == View.VISIBLE }?.requestFocus() == true
 
@@ -713,6 +808,7 @@ class MainActivity : Activity() {
             lateinit var icon: ImageView
             lateinit var caption: TextView
             val row = LinearLayout(this).apply {
+                id = View.generateViewId()
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isFocusable = true
@@ -736,6 +832,17 @@ class MainActivity : Activity() {
                 }
                 setOnFocusChangeListener { view, hasFocus ->
                     updateNavigationVisuals(if (hasFocus) view else navItems.findFocus())
+                }
+                setOnKeyListener { _, eventKeyCode, keyEvent ->
+                    if (keyEvent.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                    when (eventKeyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT,
+                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DPAD_UP,
+                        KeyEvent.KEYCODE_DPAD_DOWN,
+                        -> moveDpad(eventKeyCode)
+                        else -> false
+                    }
                 }
             }
             icon = ImageView(this).apply {
@@ -951,6 +1058,7 @@ class MainActivity : Activity() {
         categoryList.removeAllViews()
         categories.forEach { category ->
             val item = TextView(this).apply {
+                id = View.generateViewId()
                 text = category
                 gravity = Gravity.CENTER
                 textSize = 10f
@@ -977,13 +1085,28 @@ class MainActivity : Activity() {
                     }
                 }
                 setOnFocusChangeListener { view, hasFocus ->
-                    if (hasFocus) view.background = rounded(0x334CE8F0, 18f)
+                    view.background = rounded(
+                        if (hasFocus || category == selectedCategory) 0x334CE8F0 else 0x00111629,
+                        18f,
+                    )
+                }
+                setOnKeyListener { _, eventKeyCode, keyEvent ->
+                    if (keyEvent.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                    when (eventKeyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT,
+                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DPAD_UP,
+                        KeyEvent.KEYCODE_DPAD_DOWN,
+                        -> moveDpad(eventKeyCode)
+                        else -> false
+                    }
                 }
             }
             item.setTextColor(if (category == selectedCategory) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
             item.background = rounded(if (category == selectedCategory) 0x334CE8F0 else 0x00111629, 18f)
             categoryList.addView(item)
         }
+        configureExplicitFocusGraph()
         if (focusCategoryWhenReady) {
             focusCategoryWhenReady = false
             categoryList.post { focusFirstCategory() }
@@ -993,6 +1116,7 @@ class MainActivity : Activity() {
     private fun renderCatalog() {
         if (radioMode || !databaseBackedCatalog) {
             catalogAdapter.submit(visibleItems(), selectedEntry?.key)
+            channelList.post { configureExplicitFocusGraph() }
             return
         }
         pageRequestId++
@@ -1034,6 +1158,7 @@ class MainActivity : Activity() {
                 pagedItems.addAll(page)
                 if (offset == 0) {
                     catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
+                    channelList.post { configureExplicitFocusGraph() }
                     if (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key }) selectEntry(page.first(), false)
                     if (focusCatalogWhenReady) {
                         focusCatalogWhenReady = false
@@ -1041,6 +1166,7 @@ class MainActivity : Activity() {
                     }
                 } else {
                     catalogAdapter.append(page)
+                    channelList.post { configureExplicitFocusGraph() }
                 }
                 if (page.size < pageSize) pageFinished = true
             }
@@ -1706,8 +1832,9 @@ class MainActivity : Activity() {
         }
         actions += "⌕  BUSCAR" to { showSearchDialog() }
         actions.forEachIndexed { index, (label, clickAction) ->
-            val action = TextView(this).apply {
-                text = label
+            val                 action = TextView(this).apply {
+                    id = View.generateViewId()
+                    text = label
                 gravity = Gravity.CENTER
                 textSize = 11f
                 maxLines = 1
@@ -1728,6 +1855,7 @@ class MainActivity : Activity() {
             }
             actionRow.addView(action)
         }
+        configureExplicitFocusGraph()
     }
 
 
