@@ -2,6 +2,7 @@ package com.maximus.tvplayer
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Intent
 import android.net.Uri
 import android.graphics.Color
@@ -10,6 +11,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
 import android.widget.CheckBox
@@ -81,6 +83,7 @@ class MainActivity : Activity() {
     private var miniPlayer: ExoPlayer? = null
     private var miniPlayerView: PlayerView? = null
     private var miniPlayerEntryKey: String? = null
+    private var miniPlayerDialog: Dialog? = null
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
@@ -282,7 +285,7 @@ class MainActivity : Activity() {
             icon = ImageView(this).apply {
                 setImageResource(iconRes)
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                alpha = if (isNavigationSelected(label) || index == 1) 1f else 0.72f
+                alpha = if (isNavigationSelected(label)) 1f else 0.72f
                 background = rounded(0x441B2036, 28f)
                 layoutParams = LinearLayout.LayoutParams(123, 123).apply { setMargins(0, 0, 0, 8) }
                 setPadding(28, 28, 28, 28)
@@ -292,12 +295,12 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 includeFontPadding = false
                 textSize = 11f
-                setTextColor(if (isNavigationSelected(label) || index == 1) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
                 layoutParams = LinearLayout.LayoutParams(-1, 26)
             }
             row.addView(icon)
             row.addView(caption)
-            row.background = rounded(if (isNavigationSelected(label) || index == 1) 0x223FE7EF else 0x00111629, 12f)
+            row.background = rounded(if (isNavigationSelected(label)) 0x223FE7EF else 0x00111629, 12f)
             navItems.addView(row)
         }
     }
@@ -497,7 +500,7 @@ class MainActivity : Activity() {
     private fun handleEntryClick(entry: CatalogEntry) {
         if (entry.kind == MediaKind.LIVE) {
             if (miniPlayerEntryKey == entry.key && miniPlayer != null) {
-                openEntry(entry)
+                expandMiniPlayer()
             } else {
                 selectEntry(entry, true)
                 startMiniPlayer(entry)
@@ -514,8 +517,8 @@ class MainActivity : Activity() {
         }
         stopMiniPlayer()
         val playerView = PlayerView(this).apply {
-            useController = true
-            controllerShowTimeoutMs = 4_000
+            useController = false
+            controllerShowTimeoutMs = 0
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
@@ -533,8 +536,33 @@ class MainActivity : Activity() {
         videoPreviewText.text = "Mini player • ${entry.name}"
     }
 
+    private fun expandMiniPlayer() {
+        val playerView = miniPlayerView ?: return
+        val player = miniPlayer ?: return
+        val parent = playerView.parent as? ViewGroup
+        parent?.removeView(playerView)
+        val fullScreen = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(playerView, FrameLayout.LayoutParams(-1, -1))
+        }
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+            setContentView(fullScreen)
+            setOnDismissListener {
+                (playerView.parent as? ViewGroup)?.removeView(playerView)
+                videoPreview.addView(playerView, 1)
+                miniPlayerDialog = null
+            }
+        }
+        miniPlayerDialog = dialog
+        dialog.show()
+        player.playWhenReady = true
+    }
+
     private fun stopMiniPlayer() {
-        miniPlayerView?.let { videoPreview.removeView(it) }
+        miniPlayerDialog?.setOnDismissListener(null)
+        miniPlayerDialog?.dismiss()
+        miniPlayerDialog = null
+        miniPlayerView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         miniPlayerView = null
         miniPlayer?.release()
         miniPlayer = null
@@ -610,7 +638,9 @@ class MainActivity : Activity() {
                 }
                 setOnClickListener {
                     when (index) {
-                        0 -> if (entry.kind != MediaKind.LIVE && entry.trailerUrl.isNotBlank()) openPreview(entry) else openEntry(entry)
+                        0 -> if (entry.kind == MediaKind.LIVE) {
+                            if (miniPlayerEntryKey == entry.key && miniPlayer != null) expandMiniPlayer() else startMiniPlayer(entry)
+                        } else if (entry.trailerUrl.isNotBlank()) openPreview(entry) else openEntry(entry)
                         1 -> {
                             toggleFavorite(entry)
                             renderActions(entry)
