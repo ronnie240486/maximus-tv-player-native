@@ -1441,7 +1441,11 @@ class MainActivity : Activity() {
         renderActions(entry)
         if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) enrichEntryMetadata(entry)
         if (requestFocus) channelList.requestFocus()
-        if (!databaseBackedCatalog) renderCatalog() else catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
+        if (!databaseBackedCatalog || radioMode) {
+            catalogAdapter.submit(visibleItems(), selectedEntry?.key)
+        } else {
+            catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
+        }
     }
 
     private fun enrichEntryMetadata(entry: CatalogEntry) {
@@ -2338,6 +2342,10 @@ class MainActivity : Activity() {
 
     private fun switchRadio() {
         parentalUnlocked = false
+        pageRequestId++
+        pagedItems.clear()
+        pageLoading = false
+        pageFinished = true
         radioDialog?.dismiss()
         radioMode = true
         voiceMode = false
