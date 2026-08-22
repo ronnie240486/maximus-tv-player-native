@@ -108,6 +108,8 @@ class MainActivity : Activity() {
     private var pageLoading = false
     private var pageFinished = false
     private var pageRequestId = 0
+    private var categoryRequestId = 0
+    private val categoryCache = mutableMapOf<MediaKind, List<String>>()
     private var selectedEntry: CatalogEntry? = null
     private var selectedCategory = "Todos"
     private var query = ""
@@ -356,6 +358,10 @@ class MainActivity : Activity() {
     }
 
     private fun switchSection(kind: MediaKind) {
+        seriesEpisodesDialog?.dismiss()
+        seriesSeasonsDialog?.dismiss()
+        stopMiniPlayer()
+        selectedEntry = null
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
@@ -363,6 +369,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         favoritesOnly = false
         currentKind = kind
+        categoryRequestId++
         liveHeader.text = when (kind) {
             MediaKind.LIVE -> "◉  Live TV"
             MediaKind.MOVIE -> "◉  Filmes"
@@ -383,12 +390,17 @@ class MainActivity : Activity() {
     }
 
     private fun switchFavorites() {
+        seriesEpisodesDialog?.dismiss()
+        seriesSeasonsDialog?.dismiss()
+        stopMiniPlayer()
+        selectedEntry = null
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
         findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         favoritesOnly = true
+        categoryRequestId++
         liveHeader.text = "◉  Favoritos"
         selectedCategory = "Todos"
         query = ""
@@ -402,12 +414,18 @@ class MainActivity : Activity() {
 
     private fun renderCategories() {
         if (databaseBackedCatalog) {
-            categoryList.removeAllViews()
-            renderCategoryButtons(listOf("Todos"))
             val requestKind = currentKind
+            val requestId = ++categoryRequestId
+            val cachedGroups = categoryCache[requestKind].orEmpty()
+            categoryList.removeAllViews()
+            renderCategoryButtons(listOf("Todos") + cachedGroups)
             repository.queryGroups(requestKind, hiddenGroups()) { groups ->
                 runOnUiThread {
-                    if (databaseBackedCatalog && currentKind == requestKind) renderCategoryButtons(listOf("Todos") + groups)
+                    if (!databaseBackedCatalog || currentKind != requestKind || requestId != categoryRequestId) return@runOnUiThread
+                    val freshGroups = groups.map { it.ifBlank { "Sem categoria" } }.distinct().sorted()
+                    categoryCache[requestKind] = freshGroups
+                    if (selectedCategory != "Todos" && selectedCategory !in freshGroups) selectedCategory = "Todos"
+                    renderCategoryButtons(listOf("Todos") + freshGroups)
                 }
             }
             return
@@ -1144,6 +1162,8 @@ class MainActivity : Activity() {
         }
         catalog = snapshot
         databaseBackedCatalog = snapshot.databaseBacked
+        categoryCache.clear()
+        categoryRequestId++
         greeting.text = "Olá, usuário  •  ${snapshot.totalCount} itens"
         currentKind = MediaKind.LIVE
         favoritesOnly = false
@@ -1185,6 +1205,8 @@ class MainActivity : Activity() {
     private fun showCatalogUnavailable(message: String) {
         databaseBackedCatalog = false
         catalog = CatalogSnapshot(emptyList())
+        categoryCache.clear()
+        categoryRequestId++
         pagedItems.clear()
         selectedEntry = null
         renderCategories()
