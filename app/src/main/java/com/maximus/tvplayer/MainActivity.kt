@@ -2058,45 +2058,35 @@ class MainActivity : Activity() {
             append("\\n\\nCatálogo: ").append(catalog.totalCount).append(" itens em ").append(catalog.groupCount).append(" grupos.")
             append("\\nControle parental: ").append(if (hasParentalPin()) "PIN configurado" else "não configurado")
         }
-        val options = arrayOf(
-            "Controle parental (PIN)",
-            "Áudio e reprodução",
-            "Legendas e idioma",
-            "Comando de voz",
-            "Rádio",
-            "EPG e programação",
-            "DNS do painel",
-            "Playlists e cache",
-            "Categorias ocultas e ordem",
-            "Sincronização e notificações",
-            "Testar API do servidor",
-            "Verificar atualização",
-            "Sobre o Excellence",
-            "Sair do aplicativo",
+        val options = listOf(
+            "Controle parental (PIN)" to { showParentalControlDialog() },
+            "Áudio e reprodução" to { showPlaybackSettingsDialog() },
+            "Legendas e idioma" to { showSubtitleLanguageDialog() },
+            "Comando de voz" to { startVoiceCommand() },
+            "Rádio" to { showRadioDialog() },
+            "EPG e programação" to { showEpgSettingsDialog() },
+            "DNS do painel" to { showDnsDialog() },
+            "Playlists e cache" to { showPlaylistSettingsDialog() },
+            "Categorias ocultas e ordem" to { showCatalogRulesDialog() },
+            "Sincronização e notificações" to { showSyncSettingsDialog() },
+            "Testar API do servidor" to { showServerTestDialog() },
+            "Verificar atualização" to { checkForAppUpdate() },
+            "Sobre o Excellence" to { showAboutDialog() },
+            "Sair do aplicativo" to { showExitConfirmation() },
         )
-        AlertDialog.Builder(this)
-            .setTitle("Configurações do Excellence")
-            .setMessage(message)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showParentalControlDialog()
-                    1 -> showPlaybackSettingsDialog()
-                    2 -> showSubtitleLanguageDialog()
-                    3 -> startVoiceCommand()
-                    4 -> showRadioDialog()
-                    5 -> showEpgSettingsDialog()
-                    6 -> showDnsDialog()
-                    7 -> showPlaylistSettingsDialog()
-                    8 -> showCatalogRulesDialog()
-                    9 -> showSyncSettingsDialog()
-                    10 -> showServerTestDialog()
-                    11 -> checkForAppUpdate()
-                    12 -> showAboutDialog()
-                    13 -> showExitConfirmation()
-                }
-            }
-            .setNegativeButton("Fechar", null)
-            .show()
+        val (dialog, list) = createCatalogDialog(
+            title = "Configurações do Excellence",
+            subtitle = "Use cima/baixo e pressione OK para abrir uma opção",
+            onBack = null,
+        )
+        list.addView(dialogMessage(message))
+        options.forEach { (label, action) ->
+            list.addView(dialogButton(label) {
+                dialog.dismiss()
+                action()
+            })
+        }
+        dialog.show()
     }
 
     private fun showPlaybackSettingsDialog() {
