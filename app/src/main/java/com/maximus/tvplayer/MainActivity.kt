@@ -248,12 +248,12 @@ class MainActivity : Activity() {
     private fun renderNavigation() {
         navItems.removeAllViews()
         val items = listOf(
-            Triple("INÍCIO", R.drawable.ic_nav_home, "Início"),
-            Triple("CANAIS", R.drawable.ic_nav_live, "Canais"),
-            Triple("FILMES", R.drawable.ic_nav_movies, "Filmes"),
-            Triple("SÉRIES", R.drawable.ic_nav_series, "Séries"),
-            Triple("FAVORITOS", R.drawable.ic_nav_favorites, "Favoritos"),
-            Triple("AJUSTES", R.drawable.ic_nav_settings, "Ajustes"),
+            Triple("INÍCIO", R.drawable.nav_home_3d, "Início"),
+            Triple("CANAIS", R.drawable.nav_live_3d, "Canais"),
+            Triple("FILMES", R.drawable.nav_movies_3d, "Filmes"),
+            Triple("SÉRIES", R.drawable.nav_series_3d, "Séries"),
+            Triple("FAVORITOS", R.drawable.nav_favorites_3d, "Favoritos"),
+            Triple("AJUSTES", R.drawable.nav_settings_3d, "Ajustes"),
         )
         items.forEachIndexed { index, (label, iconRes, captionText) ->
             lateinit var icon: ImageView
@@ -263,8 +263,10 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isClickable = true
-                setPadding(0, 5, 0, 5)
-                layoutParams = LinearLayout.LayoutParams(-1, 174).apply { setMargins(6, 8, 6, 8) }
+                clipChildren = false
+                clipToPadding = false
+                setPadding(0, 6, 0, 6)
+                layoutParams = LinearLayout.LayoutParams(-1, 220).apply { setMargins(6, 10, 6, 10) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -286,9 +288,9 @@ class MainActivity : Activity() {
                 setImageResource(iconRes)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 alpha = if (isNavigationSelected(label)) 1f else 0.72f
-                background = rounded(0x441B2036, 28f)
-                layoutParams = LinearLayout.LayoutParams(123, 123).apply { setMargins(0, 0, 0, 8) }
-                setPadding(28, 28, 28, 28)
+                background = null
+                layoutParams = LinearLayout.LayoutParams(140, 140).apply { setMargins(0, 0, 0, 8) }
+                setPadding(0, 0, 0, 0)
             }
             caption = TextView(this).apply {
                 text = captionText
