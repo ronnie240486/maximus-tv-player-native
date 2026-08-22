@@ -44,6 +44,8 @@ private data class ChannelEditorial(
 )
 
 class MainActivity : Activity() {
+    private enum class PreviewMode { NONE, TRAILER, CONTENT }
+
     private val pageSize = 120
     private lateinit var channelList: RecyclerView
     private lateinit var videoPreview: FrameLayout
@@ -86,6 +88,7 @@ class MainActivity : Activity() {
     private var miniPlayerEntryKey: String? = null
     private var miniPlayerDialog: Dialog? = null
     private var miniTrailerView: WebView? = null
+    private var previewMode = PreviewMode.NONE
     private var seriesSeasonsDialog: Dialog? = null
     private var seriesEpisodesDialog: Dialog? = null
 
@@ -518,21 +521,36 @@ class MainActivity : Activity() {
     }
 
     private fun handleEntryClick(entry: CatalogEntry) {
-        if (entry.kind == MediaKind.SERIES && !favoritesOnly) {
+        if (entry.kind == MediaKind.SERIES && entry.episode.isBlank() && !favoritesOnly) {
             selectEntry(entry, true)
             showSeriesSeasonsDialog(entry)
             return
         }
-        if (hasActiveMiniPreview(entry)) {
+        val sameEntry = miniPlayerEntryKey == entry.key
+        if (sameEntry && previewMode == PreviewMode.TRAILER) {
+            startContentPreview(entry)
+            return
+        }
+        if (sameEntry && previewMode == PreviewMode.CONTENT) {
             expandMiniPlayer()
             return
         }
         selectEntry(entry, true)
         if (entry.kind == MediaKind.MOVIE) {
             startTrailerPreview(entry)
+        } else if (entry.kind == MediaKind.SERIES && entry.trailerUrl.isNotBlank()) {
+            startTrailerPreview(entry)
         } else {
             startMiniPlayer(entry)
         }
+    }
+
+    private fun startContentPreview(entry: CatalogEntry) {
+        if (entry.streamUrl.isBlank()) {
+            Toast.makeText(this, "Este item não possui o filme/episódio disponível na lista do painel", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startMiniPlayer(entry, entry.streamUrl, entry.name)
     }
 
     private fun hasActiveMiniPreview(entry: CatalogEntry): Boolean =
@@ -559,6 +577,7 @@ class MainActivity : Activity() {
         miniPlayer = player
         miniPlayerView = playerView
         miniPlayerEntryKey = entry.key
+        previewMode = PreviewMode.CONTENT
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
         liveBadge.visibility = if (entry.kind == MediaKind.LIVE) View.VISIBLE else View.GONE
@@ -586,11 +605,12 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
             isFocusable = false
             layoutParams = FrameLayout.LayoutParams(-1, -1)
-            loadUrl("https://www.youtube.com/results?search_query=$query")
+            loadUrl("https://www.youtube.com/embed?listType=search&list=$query&autoplay=1&controls=1&playsinline=1&rel=0")
         }
         videoPreview.addView(webView, 1)
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
+        previewMode = PreviewMode.TRAILER
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
         liveBadge.visibility = View.VISIBLE
@@ -628,6 +648,7 @@ class MainActivity : Activity() {
         videoPreview.addView(webView, 1)
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
+        previewMode = PreviewMode.TRAILER
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
         liveBadge.visibility = View.VISIBLE
@@ -672,6 +693,7 @@ class MainActivity : Activity() {
         miniPlayer?.release()
         miniPlayer = null
         miniPlayerEntryKey = null
+        previewMode = PreviewMode.NONE
         if (::heroImage.isInitialized) heroImage.visibility = View.VISIBLE
         if (::previewLogo.isInitialized) previewLogo.visibility = View.GONE
     }
@@ -733,12 +755,13 @@ class MainActivity : Activity() {
             else -> "▶  REPRODUZIR"
         }
         actions += primaryLabel to {
-            if (entry.kind == MediaKind.MOVIE) {
-                if (hasActiveMiniPreview(entry)) expandMiniPlayer() else startTrailerPreview(entry)
-            } else if (hasActiveMiniPreview(entry)) {
-                expandMiniPlayer()
-            } else {
-                startMiniPlayer(entry)
+            val sameEntry = miniPlayerEntryKey == entry.key
+            when {
+                sameEntry && previewMode == PreviewMode.TRAILER -> startContentPreview(entry)
+                sameEntry && previewMode == PreviewMode.CONTENT -> expandMiniPlayer()
+                entry.kind == MediaKind.MOVIE -> startTrailerPreview(entry)
+                entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() && entry.trailerUrl.isNotBlank() -> startTrailerPreview(entry)
+                else -> startMiniPlayer(entry)
             }
         }
         if (entry.kind == MediaKind.SERIES) {
@@ -771,23 +794,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openPreview(entry: CatalogEntry) {
-        val trailer = entry.trailerUrl.trim()
-        if (trailer.isBlank()) {
-            val query = Uri.encode("${entry.name} trailer oficial")
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$query")))
-            return
-        }
-        if (trailer.contains("youtube.com", true) || trailer.contains("youtu.be", true)) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailer)))
-        } else {
-            startActivity(Intent(this, PlayerActivity::class.java).apply {
-                putExtra(PlayerActivity.EXTRA_TITLE, "Trailer • ${entry.name}")
-                putExtra(PlayerActivity.EXTRA_URL, trailer)
-                putExtra(PlayerActivity.EXTRA_MAC, getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
-            })
-        }
-    }
 
     private fun openEntry(entry: CatalogEntry) {
         if (entry.streamUrl.isBlank()) {
@@ -854,12 +860,17 @@ class MainActivity : Activity() {
                     val code = episode.episode.takeIf { it.isNotBlank() }?.let { "E${it.padStart(2, '0')}" } ?: "EP"
                     val episodeTitle = episode.name.removePrefix("${showTitle} ").trim().ifBlank { episode.name }
                     list.addView(dialogButton("$code  •  $episodeTitle") {
-                        if (hasActiveMiniPreview(episode)) {
-                            dialog.dismiss()
-                            expandMiniPlayer()
-                        } else {
-                            selectEntry(episode, false)
-                            if (episode.trailerUrl.isNotBlank()) startTrailerPreview(episode) else startMiniPlayer(episode)
+                        val sameEntry = miniPlayerEntryKey == episode.key
+                        when {
+                            sameEntry && previewMode == PreviewMode.TRAILER -> startContentPreview(episode)
+                            sameEntry && previewMode == PreviewMode.CONTENT -> {
+                                dialog.dismiss()
+                                expandMiniPlayer()
+                            }
+                            else -> {
+                                selectEntry(episode, false)
+                                if (episode.trailerUrl.isNotBlank()) startTrailerPreview(episode) else startMiniPlayer(episode)
+                            }
                         }
                     })
                 }
