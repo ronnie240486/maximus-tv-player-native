@@ -13,9 +13,17 @@ class CatalogDatabase(context: Context) {
     fun replaceStreaming(feed: ((CatalogEntry) -> Unit) -> Unit, onProgress: (Int) -> Unit = {}): Stats {
         val db = helper.writableDatabase
         var total = 0
-        db.beginTransaction()
+        var liveCount = 0
+        var movieCount = 0
+        var seriesCount = 0
+        val groups = HashSet<String>()
+        db.beginTransactionNonExclusive()
         try {
             db.delete(TABLE, null, null)
+            // Índices são caros em 274k inserts. Recriá-los ao final reduz muito o tempo em TV Box.
+            db.execSQL("DROP INDEX IF EXISTS idx_catalog_kind_group")
+            db.execSQL("DROP INDEX IF EXISTS idx_catalog_name")
+            db.execSQL("DROP INDEX IF EXISTS idx_catalog_series_season")
             val statement = db.compileStatement(
                 "INSERT OR REPLACE INTO $TABLE " +
                     "(item_key,name,group_title,tvg_id,logo_url,stream_url,kind,quality,series_group,season,episode,year,synopsis,cast,backdrop_url,trailer_url,runtime) " +
@@ -26,13 +34,23 @@ class CatalogDatabase(context: Context) {
                 bind(statement, entry)
                 statement.executeInsert()
                 total++
-                if (total % 5_000 == 0) onProgress((60 + total / 10_000).coerceAtMost(95))
+                when (entry.kind) {
+                    MediaKind.LIVE -> liveCount++
+                    MediaKind.MOVIE -> movieCount++
+                    MediaKind.SERIES -> seriesCount++
+                }
+                groups += entry.groupTitle
+                if (total % 2_000 == 0) onProgress((60 + total / 8_000).coerceAtMost(94))
             }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
+            // Recriar fora da transação garante índices mesmo se o download falhar no meio.
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_kind_group ON $TABLE(kind, group_title)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_name ON $TABLE(name COLLATE NOCASE)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_series_season ON $TABLE(kind, series_group, season)")
         }
-        return Stats(total, countKind(db, MediaKind.LIVE), countKind(db, MediaKind.MOVIE), countKind(db, MediaKind.SERIES), countGroups(db))
+        return Stats(total, liveCount, movieCount, seriesCount, groups.size)
     }
 
     fun replace(entries: Sequence<CatalogEntry>): Stats = replaceStreaming({ emit -> entries.forEach(emit) })
@@ -44,8 +62,7 @@ class CatalogDatabase(context: Context) {
     fun count(): Int = helper.readableDatabase.rawQuery("SELECT COUNT(*) FROM $TABLE", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     fun stats(): Stats {
-        val db = helper.readableDatabase
-        return Stats(count(), countKind(db, MediaKind.LIVE), countKind(db, MediaKind.MOVIE), countKind(db, MediaKind.SERIES), countGroups(db))
+        return aggregateStats(helper.readableDatabase)
     }
 
     fun groups(kind: MediaKind, hidden: Set<String>): List<String> {
@@ -179,12 +196,38 @@ class CatalogDatabase(context: Context) {
         return "AND UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})"
     }
 
-    private fun countKind(db: SQLiteDatabase, kind: MediaKind): Int = db.rawQuery("SELECT COUNT(*) FROM $TABLE WHERE kind=?", arrayOf(kind.name)).use { if (it.moveToFirst()) it.getInt(0) else 0 }
-    private fun countGroups(db: SQLiteDatabase): Int = db.rawQuery("SELECT COUNT(DISTINCT group_title) FROM $TABLE", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    private fun aggregateStats(db: SQLiteDatabase, knownTotal: Int? = null): Stats {
+        val sql = "SELECT COUNT(*), SUM(CASE WHEN kind='LIVE' THEN 1 ELSE 0 END), SUM(CASE WHEN kind='MOVIE' THEN 1 ELSE 0 END), SUM(CASE WHEN kind='SERIES' THEN 1 ELSE 0 END), COUNT(DISTINCT group_title) FROM $TABLE"
+        return db.rawQuery(sql, null).use { cursor ->
+            if (!cursor.moveToFirst()) return@use Stats(knownTotal ?: 0, 0, 0, 0, 0)
+            Stats(
+                knownTotal ?: cursor.getInt(0),
+                cursor.getInt(1),
+                cursor.getInt(2),
+                cursor.getInt(3),
+                cursor.getInt(4),
+            )
+        }
+    }
 
     private fun bind(statement: android.database.sqlite.SQLiteStatement, e: CatalogEntry) {
-        listOf(e.key, e.name, e.groupTitle, e.tvgId, e.logoUrl, e.streamUrl, e.kind.name, e.quality, e.seriesGroup, e.season, e.episode, e.year, e.synopsis, e.cast, e.backdropUrl, e.trailerUrl, e.runtime)
-            .forEachIndexed { index, value -> statement.bindString(index + 1, value) }
+        statement.bindString(1, e.key)
+        statement.bindString(2, e.name)
+        statement.bindString(3, e.groupTitle)
+        statement.bindString(4, e.tvgId)
+        statement.bindString(5, e.logoUrl)
+        statement.bindString(6, e.streamUrl)
+        statement.bindString(7, e.kind.name)
+        statement.bindString(8, e.quality)
+        statement.bindString(9, e.seriesGroup)
+        statement.bindString(10, e.season)
+        statement.bindString(11, e.episode)
+        statement.bindString(12, e.year)
+        statement.bindString(13, e.synopsis)
+        statement.bindString(14, e.cast)
+        statement.bindString(15, e.backdropUrl)
+        statement.bindString(16, e.trailerUrl)
+        statement.bindString(17, e.runtime)
     }
 
     private fun readEntry(c: android.database.Cursor): CatalogEntry = CatalogEntry(

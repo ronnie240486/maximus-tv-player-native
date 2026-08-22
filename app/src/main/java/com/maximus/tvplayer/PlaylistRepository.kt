@@ -302,6 +302,7 @@ class PlaylistRepository(private val context: Context) {
             connectTimeout = 20_000
             readTimeout = 60_000
             setRequestProperty("Accept", "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*")
+            setRequestProperty("Accept-Encoding", "gzip")
             setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
         }
         connection.connect()
@@ -312,12 +313,13 @@ class PlaylistRepository(private val context: Context) {
             connection.disconnect()
             error("A lista do painel recusou a conexão (HTTP $status)")
         }
-        val input = stream ?: run {
+        val rawInput = stream ?: run {
             connection.disconnect()
             error("A lista do painel não retornou conteúdo")
         }
+        val input = if (connection.getHeaderField("Content-Encoding").equals("gzip", true)) GZIPInputStream(rawInput) else rawInput
         var count = 0
-        input.bufferedReader(Charsets.UTF_8).use { reader ->
+        java.io.BufferedReader(InputStreamReader(input, Charsets.UTF_8), 64 * 1024).use { reader ->
             parseM3uStream(reader) { entry -> count++; emit(entry) }
         }
         connection.disconnect()

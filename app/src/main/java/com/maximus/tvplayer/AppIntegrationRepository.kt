@@ -356,8 +356,8 @@ class AppIntegrationRepository {
     private fun request(method: String, path: String, body: JSONObject?): JSONObject {
         val connection = (URL(RENCIA_BASE_URL + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 15_000
-            readTimeout = 30_000
+            connectTimeout = 7_000
+            readTimeout = 12_000
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
             if (body != null) {
