@@ -539,6 +539,7 @@ class MainActivity : Activity() {
             sortAlphabetically = sortAlphabetically,
             limit = pageSize,
             offset = offset,
+            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
         ) { page ->
             runOnUiThread {
                 if (requestId != pageRequestId) return@runOnUiThread
@@ -594,6 +595,7 @@ class MainActivity : Activity() {
                 sortAlphabetically = sortAlphabetically,
                 limit = 1,
                 offset = 0,
+                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
                 ) { page ->
                 runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
             }
@@ -620,7 +622,7 @@ class MainActivity : Activity() {
         selectEntry(entry, true)
         if (entry.kind == MediaKind.MOVIE) {
             startTrailerPreview(entry)
-        } else if (entry.kind == MediaKind.SERIES && entry.trailerUrl.isNotBlank()) {
+        } else if (entry.kind == MediaKind.SERIES) {
             startTrailerPreview(entry)
         } else {
             startMiniPlayer(entry)
@@ -894,7 +896,7 @@ class MainActivity : Activity() {
                 sameEntry && previewMode == PreviewMode.TRAILER -> startContentPreview(entry)
                 sameEntry && previewMode == PreviewMode.CONTENT -> expandMiniPlayer()
                 entry.kind == MediaKind.MOVIE -> startTrailerPreview(entry)
-                entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() && entry.trailerUrl.isNotBlank() -> startTrailerPreview(entry)
+                entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> startTrailerPreview(entry)
                 else -> startMiniPlayer(entry)
             }
         }
@@ -1003,7 +1005,7 @@ class MainActivity : Activity() {
                             }
                             else -> {
                                 selectEntry(episode, false)
-                                if (episode.trailerUrl.isNotBlank()) startTrailerPreview(episode) else startMiniPlayer(episode)
+                                startTrailerPreview(episode)
                             }
                         }
                     })

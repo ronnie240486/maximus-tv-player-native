@@ -69,7 +69,9 @@ class CatalogDatabase(context: Context) {
         sortAlphabetically: Boolean,
         limit: Int,
         offset: Int,
+        seriesOnly: Boolean = false,
     ): List<CatalogEntry> {
+        if (seriesOnly) return querySeriesPage(group, search, hidden, sortAlphabetically, limit, offset)
         if (kind == null && favorites.isEmpty()) return emptyList()
         val db = helper.readableDatabase
         val where = mutableListOf<String>()
@@ -91,6 +93,38 @@ class CatalogDatabase(context: Context) {
                 while (cursor.moveToNext()) add(readEntry(cursor))
             }
         }
+    }
+
+    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int): List<CatalogEntry> {
+        val db = helper.readableDatabase
+        val (sourceFilter, sourceArgs) = seriesFilter("source", group, search, hidden)
+        val sourceIdentity = "CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END"
+        val cardOrder = if (sortAlphabetically) "card.name COLLATE NOCASE ASC" else "card.rowid ASC"
+        val sql = "SELECT card.* FROM $TABLE card INNER JOIN (" +
+            "SELECT MIN(source.rowid) AS first_rowid FROM $TABLE source WHERE $sourceFilter GROUP BY $sourceIdentity" +
+            ") roots ON card.rowid = roots.first_rowid ORDER BY $cardOrder LIMIT $limit OFFSET $offset"
+        val grouped = runCatching {
+            db.rawQuery(sql, sourceArgs.toTypedArray()).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) add(readEntry(cursor))
+                }
+            }
+        }.getOrDefault(emptyList())
+        if (grouped.isNotEmpty()) return grouped
+        return queryPage(MediaKind.SERIES, group, search, hidden, emptySet(), sortAlphabetically, limit, offset, false)
+    }
+
+    private fun seriesFilter(alias: String, group: String, search: String, hidden: Set<String>): Pair<String, List<String>> {
+        val where = mutableListOf("$alias.kind=?")
+        val args = mutableListOf(MediaKind.SERIES.name)
+        if (group != "Todos") { where += "$alias.group_title=?"; args += group }
+        if (search.isNotBlank()) {
+            where += "(LOWER($alias.name) LIKE ? OR LOWER($alias.group_title) LIKE ? OR LOWER($alias.tvg_id) LIKE ? OR LOWER($alias.series_group) LIKE ?)"
+            val value = "%${search.trim().lowercase()}%"
+            args += value; args += value; args += value; args += value
+        }
+        if (hidden.isNotEmpty()) where += "UPPER($alias.group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
+        return where.joinToString(" AND ") to args
     }
 
     fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =
