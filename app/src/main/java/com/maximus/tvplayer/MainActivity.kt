@@ -20,6 +20,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.text.SimpleDateFormat
@@ -40,6 +43,7 @@ private data class ChannelEditorial(
 class MainActivity : Activity() {
     private val pageSize = 120
     private lateinit var channelList: RecyclerView
+    private lateinit var videoPreview: FrameLayout
     private lateinit var categoryList: LinearLayout
     private lateinit var navItems: LinearLayout
     private lateinit var appLogo: ImageView
@@ -74,6 +78,9 @@ class MainActivity : Activity() {
     private lateinit var homeSeriesCard: FrameLayout
     private lateinit var homeCartoonsCard: FrameLayout
     private var homeMode = false
+    private var miniPlayer: ExoPlayer? = null
+    private var miniPlayerView: PlayerView? = null
+    private var miniPlayerEntryKey: String? = null
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
@@ -174,6 +181,7 @@ class MainActivity : Activity() {
         brandMark = findViewById(R.id.brandMark)
         brandSubtitle = findViewById(R.id.brandSubtitle)
         channelList = findViewById(R.id.channelList)
+        videoPreview = findViewById(R.id.videoPreview)
         categoryList = findViewById(R.id.categoryList)
         navItems = findViewById(R.id.navItems)
         searchHint = findViewById(R.id.searchHint)
@@ -211,7 +219,9 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.homeNavMovies).setOnClickListener { switchSection(MediaKind.MOVIE) }
         findViewById<View>(R.id.homeNavSeries).setOnClickListener { switchSection(MediaKind.SERIES) }
         searchHint.setOnClickListener { showSearchDialog() }
-        findViewById<View>(R.id.videoPreview).isFocusable = true
+        videoPreview.isFocusable = true
+        videoPreview.isClickable = true
+        videoPreview.setOnClickListener { selectedEntry?.let { handleEntryClick(it) } }
     }
 
     private fun setupCatalogList() {
@@ -219,7 +229,7 @@ class MainActivity : Activity() {
             imageLoader = imageLoader,
             fallbackLogo = ::fallbackLogo,
             onSelected = { selectEntry(it, false) },
-            onClicked = { selectEntry(it, true) },
+            onClicked = { handleEntryClick(it) },
         )
         channelList.layoutManager = LinearLayoutManager(this)
         channelList.adapter = catalogAdapter
@@ -251,7 +261,7 @@ class MainActivity : Activity() {
                 isFocusable = true
                 isClickable = true
                 setPadding(0, 5, 0, 5)
-                layoutParams = LinearLayout.LayoutParams(-1, 126).apply { setMargins(4, 6, 4, 6) }
+                layoutParams = LinearLayout.LayoutParams(-1, 174).apply { setMargins(6, 8, 6, 8) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -274,8 +284,8 @@ class MainActivity : Activity() {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 alpha = if (isNavigationSelected(label) || index == 1) 1f else 0.72f
                 background = rounded(0x441B2036, 28f)
-                layoutParams = LinearLayout.LayoutParams(82, 82).apply { setMargins(0, 0, 0, 6) }
-                setPadding(18, 18, 18, 18)
+                layoutParams = LinearLayout.LayoutParams(123, 123).apply { setMargins(0, 0, 0, 8) }
+                setPadding(28, 28, 28, 28)
             }
             caption = TextView(this).apply {
                 text = captionText
@@ -484,7 +494,57 @@ class MainActivity : Activity() {
         visibleItems().firstOrNull()?.let { selectEntry(it, false) }
     }
 
+    private fun handleEntryClick(entry: CatalogEntry) {
+        if (entry.kind == MediaKind.LIVE) {
+            if (miniPlayerEntryKey == entry.key && miniPlayer != null) {
+                openEntry(entry)
+            } else {
+                selectEntry(entry, true)
+                startMiniPlayer(entry)
+            }
+        } else {
+            selectEntry(entry, true)
+        }
+    }
+
+    private fun startMiniPlayer(entry: CatalogEntry) {
+        if (entry.streamUrl.isBlank()) {
+            Toast.makeText(this, "Este canal não possui uma transmissão válida", Toast.LENGTH_SHORT).show()
+            return
+        }
+        stopMiniPlayer()
+        val playerView = PlayerView(this).apply {
+            useController = true
+            controllerShowTimeoutMs = 4_000
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+        }
+        videoPreview.addView(playerView, 1)
+        val player = ExoPlayer.Builder(this).build()
+        playerView.player = player
+        player.setMediaItem(MediaItem.fromUri(entry.streamUrl))
+        player.prepare()
+        player.playWhenReady = true
+        miniPlayer = player
+        miniPlayerView = playerView
+        miniPlayerEntryKey = entry.key
+        heroImage.visibility = View.GONE
+        previewLogo.visibility = View.GONE
+        videoPreviewText.text = "Mini player • ${entry.name}"
+    }
+
+    private fun stopMiniPlayer() {
+        miniPlayerView?.let { videoPreview.removeView(it) }
+        miniPlayerView = null
+        miniPlayer?.release()
+        miniPlayer = null
+        miniPlayerEntryKey = null
+        if (::heroImage.isInitialized) heroImage.visibility = View.VISIBLE
+        if (::previewLogo.isInitialized) previewLogo.visibility = View.GONE
+    }
+
     private fun selectEntry(entry: CatalogEntry, requestFocus: Boolean) {
+        if (selectedEntry?.key != entry.key) stopMiniPlayer()
         selectedEntry = entry
         val editorial = editorialFor(entry)
         val epgProgram = currentEpgProgram(entry)
@@ -1018,6 +1078,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopMiniPlayer()
         repository.shutdown()
         imageLoader.shutdown()
         epgRepository.shutdown()
