@@ -250,8 +250,9 @@
                 <FrameLayout
                     android:id="@+id/videoPreview"
                     android:layout_width="match_parent"
-                    android:layout_height="220dp"
+                    android:layout_height="280dp"
                     android:background="@drawable/tv_banner"
+                    android:clipChildren="true"
                     android:focusable="true">
 
                     <ImageView
@@ -305,6 +306,22 @@
                         android:textSize="10sp"
                         android:textStyle="bold"
                         android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/previewScaleButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_gravity="top|end"
+                        android:layout_margin="12dp"
+                        android:gravity="center"
+                        android:minWidth="92dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="ESTICAR"
+                        android:textColor="@color/white"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
                 </FrameLayout>
 
                 <LinearLayout
@@ -339,15 +356,23 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="11sp" />
 
-                    <TextView
-                        android:id="@+id/aboutLabel"
+                    <HorizontalScrollView
+                        android:id="@+id/actionScroll"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp"
-                        android:text="SOBRE O CANAL"
-                        android:textColor="@color/text_muted"
-                        android:textSize="10sp"
-                        android:textStyle="bold" />
+                        android:layout_marginTop="12dp"
+                        android:clipToPadding="false"
+                        android:fillViewport="false"
+                        android:paddingEnd="8dp"
+                        android:scrollbars="none">
+
+                        <LinearLayout
+                            android:id="@+id/actionRow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:paddingBottom="10dp" />
+                    </HorizontalScrollView>
 
                     <TextView
                         android:id="@+id/detailDescription"
@@ -355,10 +380,9 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
                         android:lineSpacingExtra="3dp"
+                        android:paddingBottom="6dp"
                         android:textColor="@color/text_secondary"
-                        android:textSize="12sp"
-                        android:maxLines="4"
-                        android:ellipsize="end" />
+                        android:textSize="12sp" />
 
                     <LinearLayout
                         android:id="@+id/nowCard"
@@ -413,23 +437,6 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
-                    <HorizontalScrollView
-                        android:id="@+id/actionScroll"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:clipToPadding="false"
-                        android:fillViewport="false"
-                        android:paddingEnd="8dp"
-                        android:scrollbars="none">
-
-                        <LinearLayout
-                            android:id="@+id/actionRow"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:paddingBottom="10dp" />
-                    </HorizontalScrollView>
                 </LinearLayout>
             </LinearLayout>
         </ScrollView>

@@ -28,6 +28,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -48,6 +49,7 @@ private data class ChannelEditorial(
 
 class MainActivity : Activity() {
     private enum class PreviewMode { NONE, TRAILER, CONTENT }
+    private enum class PreviewScale(val label: String) { NORMAL("NORMAL"), STRETCH("ESTICAR"), ZOOM("ZOOM") }
 
     private val pageSize = 120
     private lateinit var channelList: RecyclerView
@@ -70,13 +72,14 @@ class MainActivity : Activity() {
     private lateinit var detailChannelName: TextView
     private lateinit var detailTags: TextView
     private lateinit var detailDescription: TextView
-    private lateinit var aboutLabel: TextView
+    private lateinit var nowCard: View
     private lateinit var nowLabel: TextView
     private lateinit var currentProgram: TextView
     private lateinit var currentProgramDescription: TextView
     private lateinit var programTime: TextView
     private lateinit var nextProgram: TextView
     private lateinit var actionRow: LinearLayout
+    private lateinit var previewScaleButton: TextView
     private lateinit var vodSection: View
     private lateinit var vodCards: LinearLayout
     private lateinit var vodTitle: TextView
@@ -94,6 +97,7 @@ class MainActivity : Activity() {
     private var miniPlayerDialog: Dialog? = null
     private var miniTrailerView: WebView? = null
     private var previewMode = PreviewMode.NONE
+    private var previewScale = PreviewScale.NORMAL
     private var seriesSeasonsDialog: Dialog? = null
     private var seriesEpisodesDialog: Dialog? = null
 
@@ -213,13 +217,20 @@ class MainActivity : Activity() {
         detailChannelName = findViewById(R.id.detailChannelName)
         detailTags = findViewById(R.id.detailTags)
         detailDescription = findViewById(R.id.detailDescription)
-        aboutLabel = findViewById(R.id.aboutLabel)
+        nowCard = findViewById(R.id.nowCard)
         nowLabel = findViewById(R.id.nowLabel)
         currentProgram = findViewById(R.id.currentProgram)
         currentProgramDescription = findViewById(R.id.currentProgramDescription)
         programTime = findViewById(R.id.programTime)
         nextProgram = findViewById(R.id.nextProgram)
         actionRow = findViewById(R.id.actionRow)
+        previewScaleButton = findViewById(R.id.previewScaleButton)
+        previewScaleButton.background = rounded(0xCC101827, 10f)
+        previewScaleButton.setOnClickListener { cyclePreviewScale() }
+        previewScaleButton.setOnFocusChangeListener { view, hasFocus ->
+            view.background = rounded(if (hasFocus) 0xFF4CE8F0 else 0xCC101827, 10f)
+            (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
+        }
         vodSection = findViewById(R.id.vodSection)
         vodSection.visibility = View.GONE
         vodCards = findViewById(R.id.vodCards)
@@ -239,9 +250,52 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.homeNavMovies).setOnClickListener { switchSection(MediaKind.MOVIE) }
         findViewById<View>(R.id.homeNavSeries).setOnClickListener { switchSection(MediaKind.SERIES) }
         searchHint.setOnClickListener { showSearchDialog() }
+        previewScaleButton.visibility = View.GONE
         videoPreview.isFocusable = true
         videoPreview.isClickable = true
         videoPreview.setOnClickListener { selectedEntry?.let { handleEntryClick(it) } }
+    }
+
+    private fun cyclePreviewScale() {
+        previewScale = when (previewScale) {
+            PreviewScale.NORMAL -> PreviewScale.STRETCH
+            PreviewScale.STRETCH -> PreviewScale.ZOOM
+            PreviewScale.ZOOM -> PreviewScale.NORMAL
+        }
+        applyPreviewScale()
+    }
+
+    private fun applyPreviewScale() {
+        val content = (miniPlayerView as View?) ?: miniTrailerView ?: return
+        previewScaleButton.text = "MODO: ${previewScale.label}"
+        when (previewScale) {
+            PreviewScale.NORMAL -> {
+                content.scaleX = 1f
+                content.scaleY = 1f
+                if (content is PlayerView) content.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                if (content is WebView) applyYoutubeVideoScale(content, "contain", 1f)
+            }
+            PreviewScale.STRETCH -> {
+                content.scaleX = 1f
+                content.scaleY = 1f
+                if (content is PlayerView) content.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL
+                if (content is WebView) applyYoutubeVideoScale(content, "fill", 1f)
+            }
+            PreviewScale.ZOOM -> {
+                if (content is PlayerView) content.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                content.pivotX = content.width / 2f
+                content.pivotY = content.height / 2f
+                content.scaleX = 1.18f
+                content.scaleY = 1.18f
+                if (content is WebView) applyYoutubeVideoScale(content, "cover", 1.18f)
+            }
+        }
+    }
+
+    private fun showPreviewScaleControl() {
+        previewScaleButton.visibility = View.VISIBLE
+        previewScaleButton.text = "MODO: ${previewScale.label}"
+        applyPreviewScale()
     }
 
     private fun setupCatalogList() {
@@ -380,11 +434,7 @@ class MainActivity : Activity() {
             MediaKind.SERIES -> "Nenhuma série selecionada"
         }
         detailTags.text = ""
-        aboutLabel.text = when (kind) {
-            MediaKind.LIVE -> "SOBRE O CANAL"
-            MediaKind.MOVIE -> "SOBRE O FILME"
-            MediaKind.SERIES -> "SOBRE A SÉRIE"
-        }
+        nowCard.visibility = if (kind == MediaKind.LIVE) View.VISIBLE else View.GONE
         detailDescription.text = when (kind) {
             MediaKind.LIVE -> "Selecione um canal para visualizar os detalhes."
             MediaKind.MOVIE -> "Selecione um filme para visualizar o trailer e os detalhes."
@@ -648,6 +698,7 @@ class MainActivity : Activity() {
             return
         }
         stopMiniPlayer()
+        previewScale = PreviewScale.NORMAL
         val playerView = PlayerView(this).apply {
             useController = false
             controllerShowTimeoutMs = 0
@@ -666,6 +717,7 @@ class MainActivity : Activity() {
         miniPlayerView = playerView
         miniPlayerEntryKey = entry.key
         previewMode = mode
+        showPreviewScaleControl()
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
         liveBadge.visibility = if (entry.kind == MediaKind.LIVE) View.VISIBLE else View.GONE
@@ -756,8 +808,33 @@ class MainActivity : Activity() {
                 return !!v;
             })()""".trimIndent(),
         ) {
+            hideYoutubeSoundOverlay(webView)
+            val objectFit = when (previewScale) {
+                PreviewScale.NORMAL -> "contain"
+                PreviewScale.STRETCH -> "fill"
+                PreviewScale.ZOOM -> "cover"
+            }
+            applyYoutubeVideoScale(webView, objectFit, if (previewScale == PreviewScale.ZOOM) 1.18f else 1f)
             webView.postDelayed({ enableYoutubeAudio(webView, attempt + 1) }, if (attempt < 3) 700L else 1_500L)
         }
+    }
+
+    private fun applyYoutubeVideoScale(webView: WebView, objectFit: String, scale: Float) {
+        webView.evaluateJavascript(
+            """(function(){var s=document.getElementById('excellence-video-scale');if(!s){s=document.createElement('style');s.id='excellence-video-scale';document.head.appendChild(s);}s.textContent='video{object-fit:$objectFit !important;transform:scale($scale);transform-origin:center center;}';})()""".trimIndent(),
+            null,
+        )
+    }
+
+    private fun hideYoutubeSoundOverlay(webView: WebView) {
+        webView.evaluateJavascript(
+            """(function(){
+                var selectors='[aria-label*="Unmute" i],[aria-label*="Ativar som" i],[aria-label*="ativar o som" i],.ytp-unmute,.ytp-mute-button,.ytp-volume-panel';
+                document.querySelectorAll(selectors).forEach(function(e){e.style.display='none';e.style.visibility='hidden';});
+                document.querySelectorAll('body *').forEach(function(e){var t=(e.innerText||'').trim().toLowerCase();if(t&&t.length<42&&(t.indexOf('toque para ativar som')>=0||t.indexOf('tap to unmute')>=0||t==='ativar som'||t==='unmute')){e.style.display='none';e.style.visibility='hidden';}});
+            })()""".trimIndent(),
+            null,
+        )
     }
 
     private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
@@ -767,6 +844,8 @@ class MainActivity : Activity() {
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
         previewMode = PreviewMode.TRAILER
+        previewScale = PreviewScale.NORMAL
+        showPreviewScaleControl()
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
         liveBadge.visibility = View.VISIBLE
@@ -849,6 +928,8 @@ class MainActivity : Activity() {
             it.destroy()
         }
         miniTrailerView = null
+        previewScaleButton.visibility = View.GONE
+        previewScale = PreviewScale.NORMAL
         miniPlayer?.release()
         miniPlayer = null
         miniPlayerEntryKey = null
@@ -885,19 +966,12 @@ class MainActivity : Activity() {
         detailChannelName.text = if (isSeriesRoot) seriesTitle(entry) else entry.name
         detailTags.text = listOf(entry.groupTitle, entry.year, entry.quality, kindLabel(entry.kind), entry.runtime)
             .filter { it.isNotBlank() }.joinToString("   •   ")
-        aboutLabel.text = if (isLive) "SOBRE O CANAL" else if (entry.kind == MediaKind.MOVIE) "SOBRE O FILME" else "SOBRE A SÉRIE"
-        detailDescription.text = if (isLive) editorial.description else entry.synopsis.ifBlank { "Sinopse não informada na lista do painel." }
-        nowLabel.text = if (isLive) "AGORA" else if (entry.cast.isNotBlank()) "ELENCO" else "DETALHES"
-        currentProgram.text = if (isLive) epgProgram?.title ?: editorial.currentProgram else entry.cast.ifBlank { "Elenco não informado na lista do painel." }
-        currentProgramDescription.text = if (isLive) {
-            epgProgram?.description?.ifBlank { null } ?: editorial.currentDescription
-        } else if (hasTrailer) {
-            "Trailer disponível. Toque no painel grande ou no botão Trailer para assistir."
-        } else {
-            "Selecione o item para assistir ao conteúdo da sua lista."
-        }
-        programTime.text = if (isLive) epgProgram?.let { "${formatTime(it.start)} – ${formatTime(it.stop)}" } ?: editorial.time
-        else listOf(entry.year, entry.runtime).filter { it.isNotBlank() }.joinToString("  •  ").ifBlank { "Informações da lista do painel" }
+        nowCard.visibility = if (isLive) View.VISIBLE else View.GONE
+        detailDescription.text = if (isLive) editorial.description else displaySynopsis(entry.synopsis).ifBlank { "Sinopse não informada na lista do painel." }
+        nowLabel.text = "AGORA"
+        currentProgram.text = if (isLive) epgProgram?.title ?: editorial.currentProgram else ""
+        currentProgramDescription.text = if (isLive) epgProgram?.description?.ifBlank { null } ?: editorial.currentDescription else ""
+        programTime.text = if (isLive) epgProgram?.let { "${formatTime(it.start)} – ${formatTime(it.stop)}" } ?: editorial.time else ""
         nextProgram.text = if (isLive) {
             nextEpgProgram(entry)?.let { "A seguir  •  ${it.title}  •  ${formatTime(it.start)}" } ?: editorial.nextProgram
         } else if (isSeriesRoot) "☷  Abrir temporadas" else if (hasTrailer) "▶  Assistir trailer" else "▶  Assistir conteúdo"
@@ -1137,6 +1211,18 @@ class MainActivity : Activity() {
         setPadding(dp(18), dp(28), dp(18), dp(28))
         layoutParams = LinearLayout.LayoutParams(-1, -2)
     }
+
+    private fun displaySynopsis(value: String): String = value
+        .replace("\\n", "\n")
+        .replace("<br>", "\n", ignoreCase = true)
+        .replace("<br/>", "\n", ignoreCase = true)
+        .replace("<br />", "\n", ignoreCase = true)
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace(Regex("\\s{2,}"), " ")
+        .trim()
 
     private fun seriesTitle(entry: CatalogEntry): String = entry.seriesGroup.ifBlank { entry.name }
 

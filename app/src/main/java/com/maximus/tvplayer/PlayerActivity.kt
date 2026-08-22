@@ -1,6 +1,8 @@
 package com.maximus.tvplayer
 
 import android.app.Activity
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
 import android.view.Window
@@ -10,12 +12,17 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 
 class PlayerActivity : Activity() {
+    private enum class ScaleMode(val label: String) { NORMAL("MODO: NORMAL"), STRETCH("MODO: ESTICAR"), ZOOM("MODO: ZOOM") }
+
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private lateinit var errorView: TextView
+    private lateinit var scaleButton: TextView
+    private var scaleMode = ScaleMode.NORMAL
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,6 +37,21 @@ class PlayerActivity : Activity() {
         setContentView(R.layout.activity_player)
         playerView = findViewById(R.id.playerView)
         errorView = findViewById(R.id.playerError)
+        scaleButton = findViewById(R.id.playerScaleButton)
+        scaleButton.background = rounded(0xCC101827.toInt(), 10f)
+        scaleButton.setOnClickListener {
+            scaleMode = when (scaleMode) {
+                ScaleMode.NORMAL -> ScaleMode.STRETCH
+                ScaleMode.STRETCH -> ScaleMode.ZOOM
+                ScaleMode.ZOOM -> ScaleMode.NORMAL
+            }
+            applyScale()
+        }
+        scaleButton.setOnFocusChangeListener { view, hasFocus ->
+            view.background = rounded(if (hasFocus) 0xFF4CE8F0.toInt() else 0xCC101827.toInt(), 10f)
+            (view as TextView).setTextColor(if (hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
+        }
+        applyScale()
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
         val streamUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
         val mac = intent.getStringExtra(EXTRA_MAC).orEmpty()
@@ -53,6 +75,20 @@ class PlayerActivity : Activity() {
             exo.prepare()
             exo.playWhenReady = true
         }
+    }
+
+    private fun applyScale() {
+        scaleButton.text = scaleMode.label
+        playerView.resizeMode = when (scaleMode) {
+            ScaleMode.NORMAL -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            ScaleMode.STRETCH -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            ScaleMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        }
+    }
+
+    private fun rounded(color: Int, radiusDp: Float): GradientDrawable = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = radiusDp * resources.displayMetrics.density
     }
 
     private fun showError(message: String) {
