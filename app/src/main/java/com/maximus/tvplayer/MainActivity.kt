@@ -1016,22 +1016,21 @@ class MainActivity : Activity() {
             val action = TextView(this).apply {
                 text = label
                 gravity = Gravity.CENTER
-                textSize = 12f
+                textSize = 11f
                 maxLines = 1
                 isFocusable = true
                 isClickable = true
-                setPadding(dp(22), dp(12), dp(22), dp(12))
+                setPadding(dp(16), 0, dp(16), 0)
                 setTextColor(Color.WHITE)
-                elevation = dp(6).toFloat()
+                elevation = dp(3).toFloat()
                 background = actionButtonBackground(index == 0, false)
                 setOnFocusChangeListener { view, hasFocus ->
                     view.background = actionButtonBackground(index == 0, hasFocus)
                     (view as TextView).setTextColor(Color.WHITE)
                 }
                 setOnClickListener { clickAction() }
-                layoutParams = LinearLayout.LayoutParams(-2, dp(66)).apply {
-                    minWidth = dp(if (index == 0) 230 else 160)
-                    setMargins(0, 0, dp(12), dp(6))
+                layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply {
+                    setMargins(0, 0, 0, dp(8))
                 }
             }
             actionRow.addView(action)

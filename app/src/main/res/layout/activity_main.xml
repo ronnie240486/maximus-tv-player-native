@@ -356,23 +356,13 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="11sp" />
 
-                    <HorizontalScrollView
-                        android:id="@+id/actionScroll"
+                    <LinearLayout
+                        android:id="@+id/actionRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:clipToPadding="false"
-                        android:fillViewport="false"
-                        android:paddingEnd="8dp"
-                        android:scrollbars="none">
-
-                        <LinearLayout
-                            android:id="@+id/actionRow"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:paddingBottom="10dp" />
-                    </HorizontalScrollView>
+                        android:orientation="vertical"
+                        android:paddingBottom="8dp" />
 
                     <TextView
                         android:id="@+id/detailDescription"
