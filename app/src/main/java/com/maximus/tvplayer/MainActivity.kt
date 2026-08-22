@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.webkit.WebView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -84,6 +85,9 @@ class MainActivity : Activity() {
     private var miniPlayerView: PlayerView? = null
     private var miniPlayerEntryKey: String? = null
     private var miniPlayerDialog: Dialog? = null
+    private var miniTrailerView: WebView? = null
+    private var seriesSeasonsDialog: Dialog? = null
+    private var seriesEpisodesDialog: Dialog? = null
 
     private val repository by lazy { PlaylistRepository(this) }
     private val appIntegration = AppIntegrationRepository()
@@ -451,6 +455,7 @@ class MainActivity : Activity() {
             sortAlphabetically = sortAlphabetically,
             limit = pageSize,
             offset = offset,
+            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
         ) { page ->
             runOnUiThread {
                 if (requestId != pageRequestId) return@runOnUiThread
@@ -503,6 +508,7 @@ class MainActivity : Activity() {
                 sortAlphabetically = sortAlphabetically,
                 limit = 1,
                 offset = 0,
+                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
             ) { page ->
                 runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
             }
@@ -512,21 +518,29 @@ class MainActivity : Activity() {
     }
 
     private fun handleEntryClick(entry: CatalogEntry) {
-        if (entry.kind == MediaKind.LIVE) {
-            if (miniPlayerEntryKey == entry.key && miniPlayer != null) {
-                expandMiniPlayer()
-            } else {
-                selectEntry(entry, true)
-                startMiniPlayer(entry)
-            }
-        } else {
+        if (entry.kind == MediaKind.SERIES && !favoritesOnly) {
             selectEntry(entry, true)
+            showSeriesSeasonsDialog(entry)
+            return
+        }
+        if (hasActiveMiniPreview(entry)) {
+            expandMiniPlayer()
+            return
+        }
+        selectEntry(entry, true)
+        if (entry.kind == MediaKind.MOVIE) {
+            startTrailerPreview(entry)
+        } else {
+            startMiniPlayer(entry)
         }
     }
 
-    private fun startMiniPlayer(entry: CatalogEntry) {
-        if (entry.streamUrl.isBlank()) {
-            Toast.makeText(this, "Este canal não possui uma transmissão válida", Toast.LENGTH_SHORT).show()
+    private fun hasActiveMiniPreview(entry: CatalogEntry): Boolean =
+        miniPlayerEntryKey == entry.key && (miniPlayer != null || miniTrailerView != null)
+
+    private fun startMiniPlayer(entry: CatalogEntry, sourceUrl: String = entry.streamUrl, previewTitle: String = entry.name) {
+        if (sourceUrl.isBlank()) {
+            Toast.makeText(this, "Este item não possui uma transmissão válida", Toast.LENGTH_SHORT).show()
             return
         }
         stopMiniPlayer()
@@ -539,7 +553,7 @@ class MainActivity : Activity() {
         videoPreview.addView(playerView, 1)
         val player = ExoPlayer.Builder(this).build()
         playerView.player = player
-        player.setMediaItem(MediaItem.fromUri(entry.streamUrl))
+        player.setMediaItem(MediaItem.fromUri(sourceUrl))
         player.prepare()
         player.playWhenReady = true
         miniPlayer = player
@@ -547,29 +561,99 @@ class MainActivity : Activity() {
         miniPlayerEntryKey = entry.key
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
-        videoPreviewText.text = "Mini player • ${entry.name}"
+        liveBadge.visibility = if (entry.kind == MediaKind.LIVE) View.VISIBLE else View.GONE
+        videoPreviewText.text = "Mini player • $previewTitle"
+    }
+
+    private fun startTrailerPreview(entry: CatalogEntry) {
+        val trailer = entry.trailerUrl.trim()
+        if (trailer.isBlank()) {
+            startYoutubeTrailerSearchPreview(entry)
+        } else if (trailer.contains("youtube.com", true) || trailer.contains("youtu.be", true)) {
+            startYoutubeTrailerPreview(entry, trailer)
+        } else {
+            startMiniPlayer(entry, trailer, "Trailer • ${entry.name}")
+        }
+    }
+
+    private fun startYoutubeTrailerSearchPreview(entry: CatalogEntry) {
+        stopMiniPlayer()
+        val query = Uri.encode("${entry.name} trailer oficial")
+        val webView = WebView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            isFocusable = false
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            loadUrl("https://www.youtube.com/results?search_query=$query")
+        }
+        videoPreview.addView(webView, 1)
+        miniTrailerView = webView
+        miniPlayerEntryKey = entry.key
+        heroImage.visibility = View.GONE
+        previewLogo.visibility = View.GONE
+        liveBadge.visibility = View.VISIBLE
+        liveBadge.text = "TRAILER"
+        videoPreviewText.text = "Trailer no YouTube • ${entry.name}"
+    }
+
+    private fun youtubeVideoId(value: String): String? {
+        val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return null
+        return when {
+            uri.host?.contains("youtu.be", true) == true -> uri.pathSegments.firstOrNull()
+            uri.getQueryParameter("v").orEmpty().isNotBlank() -> uri.getQueryParameter("v")
+            uri.pathSegments.contains("shorts") -> uri.pathSegments.getOrNull(uri.pathSegments.indexOf("shorts") + 1)
+            uri.pathSegments.contains("embed") -> uri.pathSegments.getOrNull(uri.pathSegments.indexOf("embed") + 1)
+            else -> null
+        }?.takeIf { it.isNotBlank() }
+    }
+
+    private fun startYoutubeTrailerPreview(entry: CatalogEntry, trailerUrl: String) {
+        val videoId = youtubeVideoId(trailerUrl)
+        if (videoId.isNullOrBlank()) {
+            startYoutubeTrailerSearchPreview(entry)
+            return
+        }
+        stopMiniPlayer()
+        val webView = WebView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            isFocusable = false
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            loadUrl("https://www.youtube.com/embed/$videoId?autoplay=1&controls=1&playsinline=1&rel=0")
+        }
+        videoPreview.addView(webView, 1)
+        miniTrailerView = webView
+        miniPlayerEntryKey = entry.key
+        heroImage.visibility = View.GONE
+        previewLogo.visibility = View.GONE
+        liveBadge.visibility = View.VISIBLE
+        liveBadge.text = "TRAILER"
+        videoPreviewText.text = "Trailer • ${entry.name}"
     }
 
     private fun expandMiniPlayer() {
-        val playerView = miniPlayerView ?: return
-        val player = miniPlayer ?: return
-        val parent = playerView.parent as? ViewGroup
-        parent?.removeView(playerView)
+        val content = (miniPlayerView ?: miniTrailerView) ?: return
+        val player = miniPlayer
+        (content.parent as? ViewGroup)?.removeView(content)
         val fullScreen = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            addView(playerView, FrameLayout.LayoutParams(-1, -1))
+            addView(content, FrameLayout.LayoutParams(-1, -1))
         }
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
             setContentView(fullScreen)
             setOnDismissListener {
-                (playerView.parent as? ViewGroup)?.removeView(playerView)
-                videoPreview.addView(playerView, 1)
+                (content.parent as? ViewGroup)?.removeView(content)
+                videoPreview.addView(content, 1)
                 miniPlayerDialog = null
             }
         }
         miniPlayerDialog = dialog
         dialog.show()
-        player.playWhenReady = true
+        player?.playWhenReady = true
     }
 
     private fun stopMiniPlayer() {
@@ -578,6 +662,13 @@ class MainActivity : Activity() {
         miniPlayerDialog = null
         miniPlayerView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         miniPlayerView = null
+        miniTrailerView?.let {
+            (it.parent as? ViewGroup)?.removeView(it)
+            it.stopLoading()
+            it.loadUrl("about:blank")
+            it.destroy()
+        }
+        miniTrailerView = null
         miniPlayer?.release()
         miniPlayer = null
         miniPlayerEntryKey = null
@@ -635,8 +726,31 @@ class MainActivity : Activity() {
     private fun renderActions(entry: CatalogEntry) {
         actionRow.removeAllViews()
         val isFavorite = entry.key in favorites()
-        val actions = listOf(if (entry.kind != MediaKind.LIVE && entry.trailerUrl.isNotBlank()) "▶  REPRODUZIR TRAILER" else "▶  REPRODUZIR", if (isFavorite) "♥  Favorito" else "♡  Favoritar", "⌕  Buscar")
-        actions.forEachIndexed { index, label ->
+        val actions = mutableListOf<Pair<String, () -> Unit>>()
+        val primaryLabel = when {
+            entry.kind == MediaKind.MOVIE -> "▶  TRAILER NO YOUTUBE"
+            entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> "▶  REPRODUZIR EPISÓDIO"
+            else -> "▶  REPRODUZIR"
+        }
+        actions += primaryLabel to {
+            if (entry.kind == MediaKind.MOVIE) {
+                if (hasActiveMiniPreview(entry)) expandMiniPlayer() else startTrailerPreview(entry)
+            } else if (hasActiveMiniPreview(entry)) {
+                expandMiniPlayer()
+            } else {
+                startMiniPlayer(entry)
+            }
+        }
+        if (entry.kind == MediaKind.SERIES) {
+            actions += "☷  TEMPORADAS" to { showSeriesSeasonsDialog(entry) }
+        }
+        actions += (if (isFavorite) "♥  Favorito" else "♡  Favoritar") to {
+            toggleFavorite(entry)
+            renderActions(entry)
+            renderCatalog()
+        }
+        actions += "⌕  Buscar" to { showSearchDialog() }
+        actions.forEachIndexed { index, (label, clickAction) ->
             val action = TextView(this).apply {
                 text = label
                 gravity = Gravity.CENTER
@@ -650,19 +764,7 @@ class MainActivity : Activity() {
                     view.background = rounded(if (index == 0 || hasFocus) 0xFF4CE8F0 else 0xFF1B2036, 8f)
                     (view as TextView).setTextColor(if (index == 0 || hasFocus) Color.rgb(5, 6, 10) else Color.WHITE)
                 }
-                setOnClickListener {
-                    when (index) {
-                        0 -> if (entry.kind == MediaKind.LIVE) {
-                            if (miniPlayerEntryKey == entry.key && miniPlayer != null) expandMiniPlayer() else startMiniPlayer(entry)
-                        } else if (entry.trailerUrl.isNotBlank()) openPreview(entry) else openEntry(entry)
-                        1 -> {
-                            toggleFavorite(entry)
-                            renderActions(entry)
-                            renderCatalog()
-                        }
-                        2 -> showSearchDialog()
-                    }
-                }
+                setOnClickListener { clickAction() }
                 layoutParams = LinearLayout.LayoutParams(-2, 44).apply { setMargins(0, 0, 8, 0) }
             }
             actionRow.addView(action)
@@ -699,6 +801,180 @@ class MainActivity : Activity() {
             putExtra(PlayerActivity.EXTRA_MAC, getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
         })
     }
+
+    private fun showSeriesSeasonsDialog(entry: CatalogEntry) {
+        seriesEpisodesDialog?.dismiss()
+        seriesSeasonsDialog?.dismiss()
+        val showTitle = seriesTitle(entry)
+        val (dialog, list) = createCatalogDialog(
+            title = showTitle,
+            subtitle = "TEMPORADAS DISPONÍVEIS  •  selecione uma temporada para ver os episódios",
+            onBack = null,
+        )
+        seriesSeasonsDialog = dialog
+        dialog.setOnDismissListener { if (seriesSeasonsDialog === dialog) seriesSeasonsDialog = null }
+        dialog.show()
+        val render: (List<String>) -> Unit = { seasons ->
+            list.removeAllViews()
+            if (seasons.isEmpty()) {
+                list.addView(dialogMessage("Nenhuma temporada identificada para esta série na lista do painel."))
+            } else {
+                seasons.forEach { season ->
+                    list.addView(dialogButton("TEMPORADA ${season.padStart(2, '0')}") {
+                        dialog.dismiss()
+                        showSeriesEpisodesDialog(entry, season)
+                    })
+                }
+            }
+        }
+        if (databaseBackedCatalog) {
+            repository.querySeriesSeasons(showTitle, selectedCategory, hiddenGroups()) { seasons -> runOnUiThread { render(seasons) } }
+        } else {
+            render(currentItems().filter { it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle }.map { it.season.ifBlank { "1" } }.distinct().sortedBy { it.toIntOrNull() ?: 1 })
+        }
+    }
+
+    private fun showSeriesEpisodesDialog(entry: CatalogEntry, season: String) {
+        seriesEpisodesDialog?.dismiss()
+        val showTitle = seriesTitle(entry)
+        val (dialog, list) = createCatalogDialog(
+            title = showTitle,
+            subtitle = "TEMPORADA ${season.padStart(2, '0')}  •  primeiro clique inicia o preview, segundo clique expande",
+            onBack = { showSeriesSeasonsDialog(entry) },
+        )
+        seriesEpisodesDialog = dialog
+        dialog.setOnDismissListener { if (seriesEpisodesDialog === dialog) seriesEpisodesDialog = null }
+        dialog.show()
+        val render: (List<CatalogEntry>) -> Unit = { episodes ->
+            list.removeAllViews()
+            if (episodes.isEmpty()) {
+                list.addView(dialogMessage("Nenhum episódio encontrado nesta temporada."))
+            } else {
+                episodes.forEach { episode ->
+                    val code = episode.episode.takeIf { it.isNotBlank() }?.let { "E${it.padStart(2, '0')}" } ?: "EP"
+                    val episodeTitle = episode.name.removePrefix("${showTitle} ").trim().ifBlank { episode.name }
+                    list.addView(dialogButton("$code  •  $episodeTitle") {
+                        if (hasActiveMiniPreview(episode)) {
+                            dialog.dismiss()
+                            expandMiniPlayer()
+                        } else {
+                            selectEntry(episode, false)
+                            if (episode.trailerUrl.isNotBlank()) startTrailerPreview(episode) else startMiniPlayer(episode)
+                        }
+                    })
+                }
+            }
+        }
+        if (databaseBackedCatalog) {
+            repository.querySeriesEpisodes(showTitle, season, selectedCategory, hiddenGroups()) { episodes -> runOnUiThread { render(episodes) } }
+        } else {
+            render(currentItems().filter {
+                it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle && (it.season.ifBlank { "1" } == season)
+            }.sortedWith(compareBy({ it.episode.toIntOrNull() ?: Int.MAX_VALUE }, { it.name.lowercase() })))
+        }
+    }
+
+
+    private fun createCatalogDialog(title: String, subtitle: String, onBack: (() -> Unit)?): Pair<Dialog, LinearLayout> {
+        val dialog = Dialog(this)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(20), dp(24), dp(20))
+            background = rounded(0xF00B1020, 18f)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        val titleView = TextView(this).apply {
+            text = title
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        val subtitleView = TextView(this).apply {
+            text = subtitle
+            setTextColor(Color.rgb(143, 155, 184))
+            textSize = 10f
+            setPadding(0, dp(6), 0, 0)
+        }
+        heading.addView(titleView)
+        heading.addView(subtitleView)
+        header.addView(heading)
+        val close = TextView(this).apply {
+            text = if (onBack == null) "FECHAR" else "VOLTAR"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 10f
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = rounded(0xFF1B2036, 8f)
+            isFocusable = true
+            isClickable = true
+            setOnClickListener {
+                dialog.dismiss()
+                onBack?.invoke()
+            }
+        }
+        header.addView(close, LinearLayout.LayoutParams(-2, dp(42)).apply { setMargins(dp(10), 0, 0, 0) })
+        root.addView(header)
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(16), 0, 0)
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(list, FrameLayout.LayoutParams(-1, -2))
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        dialog.setContentView(root)
+        dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+            dialog.window?.setLayout(
+                (resources.displayMetrics.widthPixels * 0.72f).toInt(),
+                (resources.displayMetrics.heightPixels * 0.78f).toInt(),
+            )
+            close.requestFocus()
+        }
+        return dialog to list
+    }
+
+    private fun dialogButton(label: String, onClick: () -> Unit): TextView = TextView(this).apply {
+        text = label
+        gravity = Gravity.CENTER_VERTICAL
+        setTextColor(Color.WHITE)
+        textSize = 14f
+        maxLines = 2
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setPadding(dp(18), dp(12), dp(18), dp(12))
+        isFocusable = true
+        isClickable = true
+        background = rounded(0xFF161D33, 10f)
+        setOnFocusChangeListener { view, hasFocus ->
+            view.background = rounded(if (hasFocus) 0xFF286B7A else 0xFF161D33, 10f)
+        }
+        setOnClickListener { onClick() }
+        layoutParams = LinearLayout.LayoutParams(-1, dp(56)).apply { setMargins(0, 0, 0, dp(8)) }
+    }
+
+    private fun dialogMessage(message: String): TextView = TextView(this).apply {
+        text = message
+        setTextColor(Color.rgb(170, 177, 199))
+        textSize = 13f
+        gravity = Gravity.CENTER
+        setPadding(dp(18), dp(28), dp(18), dp(28))
+        layoutParams = LinearLayout.LayoutParams(-1, -2)
+    }
+
+    private fun seriesTitle(entry: CatalogEntry): String = entry.seriesGroup.ifBlank { entry.name }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun showSearchDialog() {
         val input = EditText(this).apply {

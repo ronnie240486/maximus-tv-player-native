@@ -17,8 +17,10 @@ class PlaylistRepository(private val context: Context) {
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
         private val ATTRIBUTE_PATTERN = Regex("([\\w-]+)\\s*=\\s*\\\"([^\\\"]*)\\\"", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
-        private val SERIES_PATTERN = Regex("\\sS\\d+|\\sTemporada", RegexOption.IGNORE_CASE)
-        private val SEASON_NAME_PATTERN = Regex("\\bs\\d{1,2}\\b", RegexOption.IGNORE_CASE)
+        private val SERIES_SEASON_PATTERN = Regex("(?:^|[\\s._-])(?:S|Season|Temporada)\\s*0*(\\d{1,2})|(?:^|[\\s._-])0*(\\d{1,2})\\s*[ªº]?\\s*Temporada", RegexOption.IGNORE_CASE)
+        private val SERIES_EPISODE_PATTERN = Regex("(?:^|[\\s._-])(?:E|EP|Episode|Epis[oó]dio)\\s*0*(\\d{1,4})", RegexOption.IGNORE_CASE)
+        private val SERIES_COMBINED_PATTERN = Regex("(?:^|[\\s._-])S\\s*0*(\\d{1,2})\\s*E(?:P)?\\s*0*(\\d{1,4})", RegexOption.IGNORE_CASE)
+        private val SEASON_NAME_PATTERN = Regex("\\bs\\d{1,2}\\b|\\btemporada\\s*\\d{1,2}", RegexOption.IGNORE_CASE)
     }
     private val executor = Executors.newSingleThreadExecutor()
     private val cacheFile = File(context.filesDir, "catalog-cache.tsv.gz")
@@ -79,11 +81,20 @@ class PlaylistRepository(private val context: Context) {
         sortAlphabetically: Boolean,
         limit: Int,
         offset: Int,
+        seriesOnly: Boolean = false,
         callback: (List<CatalogEntry>) -> Unit,
     ) {
         executor.execute {
-            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset) }.getOrDefault(emptyList()))
+            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset, seriesOnly) }.getOrDefault(emptyList()))
         }
+    }
+
+    fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>, callback: (List<String>) -> Unit) {
+        executor.execute { callback(runCatching { database.querySeriesSeasons(seriesGroup, group, hidden) }.getOrDefault(emptyList())) }
+    }
+
+    fun querySeriesEpisodes(seriesGroup: String, season: String, group: String, hidden: Set<String>, callback: (List<CatalogEntry>) -> Unit) {
+        executor.execute { callback(runCatching { database.querySeriesEpisodes(seriesGroup, season, group, hidden) }.getOrDefault(emptyList())) }
     }
 
     fun clearCache() {
@@ -106,7 +117,7 @@ class PlaylistRepository(private val context: Context) {
     private fun normalizeUrls(urls: List<String>): List<String> = urls.map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun sourceChanged(urls: List<String>): Boolean {
-        if (metadata.getInt("format_version", 0) != 3) return true
+        if (metadata.getInt("format_version", 0) != 4) return true
         val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
         if (savedUrls != urls) return true
         return urls.any { url ->
@@ -117,7 +128,7 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 3).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit().putInt("format_version", 4).putString("urls", urls.joinToString("\n"))
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
@@ -267,6 +278,7 @@ class PlaylistRepository(private val context: Context) {
         val backdrop = cleanAssetUrl(firstAttribute(attributes, "backdrop", "backdrop-url", "backdrop_url", "fanart", "fanart-url", "fanart_url", "background", "background-url", "background_url", "banner", "banner-url", "banner_url", "art", "art-url", "art_url", "cover_big"))
         val trailer = firstAttribute(attributes, "trailer", "trailer-url", "trailer_url", "youtube-trailer", "youtube_trailer")
         val runtime = firstAttribute(attributes, "duration", "runtime", "length")
+        val seriesParts = if (kind == MediaKind.SERIES) parseSeriesParts(displayName, attributes) else SeriesParts("", "", "")
         emit(CatalogEntry(
             key = "${attributes["tvg-id"].orEmpty()}|$streamUrl",
             name = displayName,
@@ -276,7 +288,9 @@ class PlaylistRepository(private val context: Context) {
             streamUrl = streamUrl,
             kind = kind,
             quality = quality,
-            seriesGroup = if (kind == MediaKind.SERIES) displayName.split(SERIES_PATTERN).first() else "",
+            seriesGroup = seriesParts.group,
+            season = seriesParts.season,
+            episode = seriesParts.episode,
             year = year,
             synopsis = synopsis,
             cast = cast,
@@ -284,6 +298,38 @@ class PlaylistRepository(private val context: Context) {
             trailerUrl = trailer,
             runtime = runtime,
         ))
+    }
+
+    private data class SeriesParts(val group: String, val season: String, val episode: String)
+
+    private fun parseSeriesParts(name: String, attributes: Map<String, String>): SeriesParts {
+        val explicitGroup = firstAttribute(attributes, "series-name", "series_title", "series-title", "series_group", "series-group", "show-name", "tv-show")
+        val seasonFromAttribute = firstAttribute(attributes, "season", "season-num", "season_number", "season-number", "tvg-season")
+            .replace(Regex("[^0-9]"), "")
+            .trimStart('0')
+            .ifBlank { "1" }
+        val episodeFromAttribute = firstAttribute(attributes, "episode", "episode-num", "episode_number", "episode-number", "tvg-episode")
+            .replace(Regex("[^0-9]"), "")
+            .trimStart('0')
+            .ifBlank { "" }
+        val seasonMatch = SERIES_SEASON_PATTERN.find(name)
+        val combinedMatch = SERIES_COMBINED_PATTERN.find(name)
+        val season = if (firstAttribute(attributes, "season", "season-num", "season_number", "season-number", "tvg-season").isNotBlank()) {
+            seasonFromAttribute
+        } else {
+            (seasonMatch?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() } ?: "1").trimStart('0').ifBlank { "1" }
+        }
+        val episode = if (episodeFromAttribute.isNotBlank()) {
+            episodeFromAttribute
+        } else {
+            combinedMatch?.groupValues?.getOrNull(2)?.trimStart('0')?.ifBlank { "0" }
+                ?: SERIES_EPISODE_PATTERN.find(name)?.groupValues?.getOrNull(1)?.trimStart('0')?.ifBlank { "0" }.orEmpty()
+        }
+        val inferredGroup = seasonMatch?.range?.first?.let { name.substring(0, it) }
+            ?.trim()?.trim('-', '–', '_', '.', '|')
+            .orEmpty()
+        val group = explicitGroup.ifBlank { inferredGroup }.ifBlank { name.trim() }
+        return SeriesParts(group = group, season = season, episode = episode)
     }
 
     private fun firstAttribute(attributes: Map<String, String>, vararg keys: String): String {
@@ -303,7 +349,7 @@ class PlaylistRepository(private val context: Context) {
         if (normalizedGroup.startsWith("series |")) return MediaKind.SERIES
         if (normalizedGroup.contains("24/7 filmes") || normalizedGroup.contains("24/7 seriados") || normalizedGroup.contains("24/7 doramas") || normalizedGroup.contains("24/7 animes") || normalizedGroup.contains("24/7 novelas")) return MediaKind.LIVE
         if (normalizedGroup == "filmes e séries" || normalizedGroup == "filmes e series") return MediaKind.LIVE
-        if (normalizedName.contains("temporada") || SEASON_NAME_PATTERN.containsMatchIn(normalizedName)) return MediaKind.SERIES
+        if (normalizedName.contains("temporada") || SEASON_NAME_PATTERN.containsMatchIn(normalizedName) || SERIES_SEASON_PATTERN.containsMatchIn(name) || SERIES_COMBINED_PATTERN.containsMatchIn(name)) return MediaKind.SERIES
         if (normalizedName.contains("filme") || normalizedName.contains("movie")) return MediaKind.MOVIE
         return MediaKind.LIVE
     }

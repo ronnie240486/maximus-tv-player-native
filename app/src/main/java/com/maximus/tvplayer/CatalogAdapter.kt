@@ -76,7 +76,7 @@ class CatalogAdapter(
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = items[position]
         holder.number.text = String.format("%02d", position + 1)
-        holder.title.text = item.name
+        holder.title.text = if (item.kind == MediaKind.SERIES && item.seriesGroup.isNotBlank()) item.seriesGroup else item.name
         holder.badge.text = item.quality.ifBlank {
             when (item.kind) {
                 MediaKind.LIVE -> "LIVE"

@@ -69,12 +69,18 @@ class CatalogDatabase(context: Context) {
         sortAlphabetically: Boolean,
         limit: Int,
         offset: Int,
+        seriesOnly: Boolean = false,
     ): List<CatalogEntry> {
         if (kind == null && favorites.isEmpty()) return emptyList()
         val db = helper.readableDatabase
         val where = mutableListOf<String>()
         val args = mutableListOf<String>()
-        kind?.let { where += "kind=?"; args += it.name }
+        if (seriesOnly) {
+            where += "kind=?"
+            args += MediaKind.SERIES.name
+        } else {
+            kind?.let { where += "kind=?"; args += it.name }
+        }
         if (group != "Todos") { where += "group_title=?"; args += group }
         if (search.isNotBlank()) {
             where += "(LOWER(name) LIKE ? OR LOWER(group_title) LIKE ? OR LOWER(tvg_id) LIKE ?)"
@@ -85,7 +91,11 @@ class CatalogDatabase(context: Context) {
         if (favorites.isNotEmpty()) where += "item_key IN (${favorites.joinToString(",") { "?" }})".also { args.addAll(favorites) }
         val selection = if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
         val order = if (sortAlphabetically) "name COLLATE NOCASE ASC" else "rowid ASC"
-        val sql = "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
+        val sql = if (seriesOnly) {
+            "SELECT * FROM $TABLE $selection GROUP BY CASE WHEN TRIM(series_group) <> '' THEN series_group ELSE name END ORDER BY $order LIMIT $limit OFFSET $offset"
+        } else {
+            "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
+        }
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) add(readEntry(cursor))
@@ -95,6 +105,38 @@ class CatalogDatabase(context: Context) {
 
     fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =
         queryPage(kind, group, search, hidden, favorites, sortAlphabetically, 1, 0).firstOrNull()
+
+    fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>): List<String> {
+        val db = helper.readableDatabase
+        val where = mutableListOf("kind=?", "series_group=?")
+        val args = mutableListOf(MediaKind.SERIES.name, seriesGroup)
+        if (group != "Todos") { where += "group_title=?"; args += group }
+        if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
+        val seasonExpr = "CASE WHEN TRIM(season) = '' THEN '1' ELSE season END"
+        val sql = "SELECT DISTINCT $seasonExpr AS season_value FROM $TABLE WHERE ${where.joinToString(" AND ")} ORDER BY CAST($seasonExpr AS INTEGER), season_value"
+        return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) cursor.getString(0).orEmpty().takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+        }
+    }
+
+    fun querySeriesEpisodes(seriesGroup: String, season: String, group: String, hidden: Set<String>): List<CatalogEntry> {
+        val db = helper.readableDatabase
+        val where = mutableListOf("kind=?", "series_group=?")
+        val args = mutableListOf(MediaKind.SERIES.name, seriesGroup)
+        val seasonExpr = "CASE WHEN TRIM(season) = '' THEN '1' ELSE season END"
+        where += "$seasonExpr=?"
+        args += season
+        if (group != "Todos") { where += "group_title=?"; args += group }
+        if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
+        val sql = "SELECT * FROM $TABLE WHERE ${where.joinToString(" AND ")} ORDER BY CAST(NULLIF(episode, '') AS INTEGER), name COLLATE NOCASE"
+        return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(readEntry(cursor))
+            }
+        }
+    }
 
     fun close() = helper.close()
 
@@ -132,15 +174,15 @@ class CatalogDatabase(context: Context) {
         runtime = c.getString(c.getColumnIndexOrThrow("runtime")),
     )
 
-    private class Helper(context: Context) : SQLiteOpenHelper(context, "excellence_catalog.db", null, 1) {
+    private class Helper(context: Context) : SQLiteOpenHelper(context, "excellence_catalog.db", null, 2) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE $TABLE (item_key TEXT PRIMARY KEY, name TEXT NOT NULL, group_title TEXT NOT NULL, tvg_id TEXT, logo_url TEXT, stream_url TEXT NOT NULL, kind TEXT NOT NULL, quality TEXT, series_group TEXT, season TEXT, episode TEXT, year TEXT, synopsis TEXT, cast TEXT, backdrop_url TEXT, trailer_url TEXT, runtime TEXT)")
             db.execSQL("CREATE INDEX idx_catalog_kind_group ON $TABLE(kind, group_title)")
             db.execSQL("CREATE INDEX idx_catalog_name ON $TABLE(name COLLATE NOCASE)")
+            db.execSQL("CREATE INDEX idx_catalog_series_season ON $TABLE(kind, series_group, season)")
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            db.execSQL("DROP TABLE IF EXISTS $TABLE")
-            onCreate(db)
+            if (oldVersion < 2) db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_series_season ON $TABLE(kind, series_group, season)")
         }
     }
 
