@@ -2221,7 +2221,15 @@ class MainActivity : Activity() {
     }
 
     private fun loadRemoteConfiguration() {
-        val mac = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty()
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+        if (prefs.getString(ActivationActivity.PREF_SOURCE_MODE, ActivationActivity.SOURCE_PANEL) == ActivationActivity.SOURCE_MANUAL) {
+            // No modo DNS/usuário/senha o dispositivo não está cadastrado no
+            // painel por MAC de propósito -- consultar o painel aqui só geraria
+            // um aviso de falha sem sentido (essa checagem é só para
+            // marca/banner/notificações, não afeta o catálogo já carregado).
+            return
+        }
+        val mac = prefs.getString(PREF_MAC_ADDRESS, "").orEmpty()
         if (mac.isBlank()) return
         val catalogImportAlreadyStarted = intent.getBooleanExtra(EXTRA_CATALOG_IMPORT_IN_PROGRESS, false)
         appIntegration.fetchConfig(mac) { result ->

@@ -258,7 +258,7 @@ class ActivationActivity : Activity() {
         if (checking || loadingPanelList) return
         checking = true
         loadingPanelList = true
-        if (showProgress) status.text = "Conectando com a configuração extra..."
+        status.text = if (showProgress) "Conectando com a configuração extra..." else "Conectando direto por DNS/usuário/senha..."
         status.setTextColor(getColor(R.color.text_secondary))
         setConnectionProgress(15, "Conectando direto por DNS/usuário/senha (sem depender do painel)...")
         verifyButton.isEnabled = false

@@ -313,6 +313,24 @@ class CatalogDatabase(context: Context) {
     )
 
     private class Helper(context: Context) : SQLiteOpenHelper(context, "excellence_catalog.db", null, 3) {
+        init {
+            // WAL permite leitores (MainActivity, com sua própria conexão) lerem
+            // o banco enquanto outra conexão (o importador, em ActivationActivity)
+            // ainda está escrevendo em segundo plano. Sem isso, o leitor recebe
+            // "database is locked" durante a importação de listas grandes, e o
+            // código de consulta engolia esse erro devolvendo uma lista vazia --
+            // dando a falsa impressão de "catálogo pronto" com a tela em branco.
+            setWriteAheadLoggingEnabled(true)
+        }
+
+        override fun onConfigure(db: SQLiteDatabase) {
+            super.onConfigure(db)
+            // Rede de segurança: se algum ponto ainda esbarrar em um lock breve
+            // (ex.: durante o rebuild dos índices ao final da importação, que
+            // precisa de acesso exclusivo), espera até 5s em vez de falhar na hora.
+            db.execSQL("PRAGMA busy_timeout=5000")
+        }
+
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE $TABLE (item_key TEXT PRIMARY KEY, name TEXT NOT NULL, group_title TEXT NOT NULL, tvg_id TEXT, logo_url TEXT, stream_url TEXT NOT NULL, kind TEXT NOT NULL, quality TEXT, series_group TEXT, season TEXT, episode TEXT, year TEXT, synopsis TEXT, cast TEXT, backdrop_url TEXT, trailer_url TEXT, runtime TEXT, is_adult INTEGER NOT NULL DEFAULT 0)")
             db.execSQL("CREATE INDEX idx_catalog_kind_group ON $TABLE(kind, group_title)")
