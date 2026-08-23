@@ -401,7 +401,7 @@ class MainActivity : Activity() {
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> if (focusedNavRow != null) focusNavigation(index - 1) else true
                 KeyEvent.KEYCODE_DPAD_DOWN -> if (focusedNavRow != null) focusNavigation(index + 1) else focusNavigation(index)
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory()
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstCategory() || focusFirstCatalogItem() || focusPreview()
                 KeyEvent.KEYCODE_DPAD_LEFT -> true
                 else -> false
             }
@@ -597,7 +597,10 @@ class MainActivity : Activity() {
         categoryList.parent?.let { parent ->
             if (parent is HorizontalScrollView) parent.smoothScrollTo(target.left, 0)
         }
-        return true
+        // Report whether focus actually moved, so callers chaining fallbacks with
+        // `||` (e.g. DPAD_RIGHT from the sidebar) don't get silently swallowed
+        // when requestFocus() fails and only the deferred retry above succeeds.
+        return focused
     }
 
     private fun focusFirstCatalogItem(): Boolean {
@@ -613,7 +616,9 @@ class MainActivity : Activity() {
         val focused = item.requestFocus()
         if (!focused) item.post { item.requestFocus() }
         channelList.smoothScrollToPosition(0)
-        return true
+        // Same reasoning as focusCategoryAt(): only claim success when requestFocus()
+        // actually moved focus, otherwise `||` fallback chains stop dead here.
+        return focused
     }
 
     private fun moveCatalogFocus(delta: Int): Boolean {
@@ -662,7 +667,7 @@ class MainActivity : Activity() {
         videoPreview.isFocusableInTouchMode = true
         val focused = videoPreview.requestFocus()
         if (!focused) videoPreview.post { videoPreview.requestFocus() }
-        return true
+        return focused
     }
 
     private fun configureExplicitFocusGraph() {
