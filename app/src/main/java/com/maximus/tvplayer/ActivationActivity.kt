@@ -198,6 +198,13 @@ class ActivationActivity : Activity() {
             .setCancelable(true)
             .create()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.setOnShowListener {
+            val displayWidth = resources.displayMetrics.widthPixels
+            dialog.window?.setLayout(
+                (displayWidth * 0.9f).toInt(),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+            )
+        }
 
         cancelButton.setOnClickListener { dialog.dismiss() }
 

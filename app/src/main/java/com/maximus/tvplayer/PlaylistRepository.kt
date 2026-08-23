@@ -382,51 +382,72 @@ class PlaylistRepository(private val context: Context) {
         val buffer = StringBuilder()
         val chunk = CharArray(32 * 1024)
         var pendingInfo: String? = null
+        // `start` é um cursor lógico dentro de `buffer`: em vez de fazer
+        // buffer.delete(0, n) a cada linha (que desloca fisicamente todo o
+        // restante do StringBuilder e é O(tamanho restante) por chamada,
+        // repetido uma vez por linha), avançamos só o cursor e compactamos
+        // o buffer de tempos em tempos. Em listas grandes (dezenas de MB)
+        // isso reduz o número de deslocamentos de memória em várias ordens
+        // de grandeza.
+        var start = 0
+        val compactThreshold = 256 * 1024
+
+        fun compactIfNeeded() {
+            if (start > compactThreshold) {
+                buffer.delete(0, start)
+                start = 0
+            }
+        }
+
         while (true) {
             val count = reader.read(chunk)
             if (count < 0) break
             buffer.append(chunk, 0, count)
             while (true) {
-                val token = buffer.indexOf("#EXTINF:")
-                val newline = buffer.indexOf('\n')
+                val token = buffer.indexOf("#EXTINF:", start)
+                val newline = buffer.indexOf('\n', start)
                 if (token < 0) {
                     if (newline >= 0) {
-                        val line = buffer.substring(0, newline)
-                        buffer.delete(0, newline + 1)
+                        val line = buffer.substring(start, newline)
+                        start = newline + 1
                         pendingInfo = processM3uLine(line, pendingInfo, emit)
+                        compactIfNeeded()
                         continue
                     }
-                    if (buffer.length > MAX_FRAGMENT_CHARS) error("A lista M3U contém uma linha inválida muito grande")
+                    if (buffer.length - start > MAX_FRAGMENT_CHARS) error("A lista M3U contém uma linha inválida muito grande")
                     break
                 }
-                if (token > 0) {
-                    if (newline >= 0 && newline < token) {
-                        val line = buffer.substring(0, newline)
-                        buffer.delete(0, newline + 1)
+                if (token > start) {
+                    if (newline in start until token) {
+                        val line = buffer.substring(start, newline)
+                        start = newline + 1
                         pendingInfo = processM3uLine(line, pendingInfo, emit)
                     } else {
-                        buffer.delete(0, token)
+                        start = token
                     }
+                    compactIfNeeded()
                     continue
                 }
-                val nextToken = buffer.indexOf("#EXTINF:", 8)
+                val nextToken = buffer.indexOf("#EXTINF:", start + 8)
                 if (nextToken >= 0) {
-                    val block = buffer.substring(0, nextToken)
-                    buffer.delete(0, nextToken)
+                    val block = buffer.substring(start, nextToken)
+                    start = nextToken
                     pendingInfo = processM3uBlock(block, pendingInfo, emit)
+                    compactIfNeeded()
                     continue
                 }
                 if (newline >= 0) {
-                    val line = buffer.substring(0, newline)
-                    buffer.delete(0, newline + 1)
+                    val line = buffer.substring(start, newline)
+                    start = newline + 1
                     pendingInfo = processM3uLine(line, pendingInfo, emit)
+                    compactIfNeeded()
                     continue
                 }
-                if (buffer.length > MAX_FRAGMENT_CHARS) error("A entrada M3U ultrapassou o limite seguro")
+                if (buffer.length - start > MAX_FRAGMENT_CHARS) error("A entrada M3U ultrapassou o limite seguro")
                 break
             }
         }
-        if (buffer.isNotBlank()) processM3uBlock(buffer.toString(), pendingInfo, emit)
+        if (start < buffer.length) processM3uBlock(buffer.substring(start), pendingInfo, emit)
     }
 
     private fun processM3uBlock(block: String, pendingInfo: String?, emit: (CatalogEntry) -> Unit): String? {
