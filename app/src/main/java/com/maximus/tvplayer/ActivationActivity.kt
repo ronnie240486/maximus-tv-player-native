@@ -39,6 +39,12 @@ class ActivationActivity : Activity() {
     private var loadingStartedAt = 0L
     private var mainOpened = false
     private var keepImporterAlive = false
+    // Cada tentativa de conexão (painel ou manual) ganha um número novo. Callbacks
+    // assíncronos só aplicam o resultado se ainda forem a tentativa mais recente --
+    // isso evita que uma checagem antiga do painel, que só termina depois do
+    // usuário já ter confirmado DNS/usuário/senha, sobrescreva ou bloqueie a
+    // tentativa manual mais nova.
+    private var connectionGeneration = 0
     private val integration = AppIntegrationRepository()
     private val playlistRepository by lazy { PlaylistRepository(this) }
     private val handler = Handler(Looper.getMainLooper())
@@ -53,7 +59,8 @@ class ActivationActivity : Activity() {
     private val periodicCheck = object : Runnable {
         override fun run() {
             val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-            if (prefs.getString(PREF_SOURCE_MODE, SOURCE_PANEL) != SOURCE_MANUAL) {
+            val manualMode = prefs.getString(PREF_SOURCE_MODE, SOURCE_PANEL) == SOURCE_MANUAL
+            if (!manualMode && !checking && !loadingPanelList) {
                 verifyAccess(false)
             }
             handler.postDelayed(this, 5_000)
@@ -255,7 +262,10 @@ class ActivationActivity : Activity() {
     }
 
     private fun connectManual(dns: String, user: String, password: String, showProgress: Boolean) {
-        if (checking || loadingPanelList) return
+        // Uma tentativa manual explícita sempre assume prioridade: não é bloqueada
+        // por uma checagem de painel ainda em andamento (ex.: a verificação
+        // automática que já dispara sozinha ao abrir o app).
+        val myGeneration = ++connectionGeneration
         checking = true
         loadingPanelList = true
         status.text = if (showProgress) "Conectando com a configuração extra..." else "Conectando direto por DNS/usuário/senha..."
@@ -272,11 +282,13 @@ class ActivationActivity : Activity() {
             listOf(manualUrl),
             onProgress = { progress ->
                 runOnUiThread {
+                    if (myGeneration != connectionGeneration) return@runOnUiThread
                     setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...")
                 }
             },
             onCatalogReady = { stats ->
                 runOnUiThread {
+                    if (myGeneration != connectionGeneration) return@runOnUiThread
                     if (!mainOpened && stats.total > 0) {
                         setConnectionProgress(86, "Catálogo inicial pronto. Organizando o restante em segundo plano...")
                         status.text = "Catálogo inicial pronto. Abrindo Excellence..."
@@ -291,6 +303,7 @@ class ActivationActivity : Activity() {
             },
             callback = { playlistResult ->
                 runOnUiThread {
+                    if (myGeneration != connectionGeneration) return@runOnUiThread
                     checking = false
                     loadingPanelList = false
                     verifyButton.isEnabled = true
@@ -337,7 +350,7 @@ class ActivationActivity : Activity() {
     }
 
     private fun verifyAccess(showProgress: Boolean) {
-        if (checking || loadingPanelList) return
+        val myGeneration = ++connectionGeneration
         checking = true
         if (showProgress) status.text = "Consultando o painel..."
         setConnectionProgress(10, "Conectando sua lista de filmes, séries e canais...")
@@ -345,6 +358,7 @@ class ActivationActivity : Activity() {
         connectButton.isEnabled = false
         integration.fetchConfig(mac) { result ->
             runOnUiThread {
+                if (myGeneration != connectionGeneration) return@runOnUiThread
                 checking = false
                 verifyButton.isEnabled = true
                 connectButton.isEnabled = true
@@ -373,11 +387,13 @@ class ActivationActivity : Activity() {
                         config.playlistUrls,
                         onProgress = { progress ->
                             runOnUiThread {
+                                if (myGeneration != connectionGeneration) return@runOnUiThread
                                 setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...")
                             }
                         },
                         onCatalogReady = { stats ->
                             runOnUiThread {
+                                if (myGeneration != connectionGeneration) return@runOnUiThread
                                 if (!mainOpened && stats.total > 0) {
                                     // O primeiro lote já foi COMMITADO. A tela principal pode
                                     // consultar SQLite enquanto o restante da M3U continua.
@@ -394,6 +410,7 @@ class ActivationActivity : Activity() {
                         },
                         callback = { playlistResult ->
                             runOnUiThread {
+                                if (myGeneration != connectionGeneration) return@runOnUiThread
                                 loadingPanelList = false
                                 playlistResult.onSuccess {
                                     setConnectionProgress(100, "Conectado. Em breve você terá em mãos o melhor conteúdo para assistir.")
@@ -467,7 +484,12 @@ class ActivationActivity : Activity() {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(MainActivity.EXTRA_CATALOG_IMPORT_IN_PROGRESS, importInProgress)
         })
-        if (!importInProgress) finish()
+        // Sempre finaliza esta tela, mesmo com o import ainda em segundo plano:
+        // keepImporterAlive (checado em onDestroy) garante que a importação
+        // continua rodando de qualquer forma. Isso evita que o botão VOLTAR,
+        // pressionado na tela principal antes do import 100% terminar, volte
+        // para esta tela de ativação, que ficaria "por baixo" dela sem isso.
+        finish()
     }
 
     override fun onDestroy() {

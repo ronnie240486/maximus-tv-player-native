@@ -2223,10 +2223,13 @@ class MainActivity : Activity() {
     private fun loadRemoteConfiguration() {
         val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
         if (prefs.getString(ActivationActivity.PREF_SOURCE_MODE, ActivationActivity.SOURCE_PANEL) == ActivationActivity.SOURCE_MANUAL) {
-            // No modo DNS/usuário/senha o dispositivo não está cadastrado no
-            // painel por MAC de propósito -- consultar o painel aqui só geraria
-            // um aviso de falha sem sentido (essa checagem é só para
-            // marca/banner/notificações, não afeta o catálogo já carregado).
+            // No modo DNS/usuário/senha não existe cadastro por MAC no painel, então
+            // pulamos appIntegration.fetchConfig (que sempre falharia e só geraria
+            // um aviso sem sentido). Mas ainda é essencial configurar o estado do
+            // catálogo aqui -- sem isso databaseBackedCatalog nunca vira true e a
+            // tela principal nunca lê o SQLite, ficando sempre vazia mesmo com a
+            // importação concluída com sucesso.
+            loadManualCatalog()
             return
         }
         val mac = prefs.getString(PREF_MAC_ADDRESS, "").orEmpty()
@@ -2252,6 +2255,34 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun loadManualCatalog() {
+        val catalogImportAlreadyStarted = intent.getBooleanExtra(EXTRA_CATALOG_IMPORT_IN_PROGRESS, false)
+        // Sem painel, não existe RemoteAppConfig real; um "vazio" basta porque
+        // applyCatalogSnapshot só usa alguns campos (ex.: epgUrl) que aqui não
+        // temos mesmo -- o catálogo em si já está no SQLite, importado pela
+        // ActivationActivity antes de abrir esta tela.
+        val emptyConfig = RemoteAppConfig(
+            registered = true, allowed = true, mac = "", appId = "maximus", appName = "Excellence",
+            status = "", expiration = "", logoUrl = "", bannerUrl = "", backgroundUrl = "",
+            messageTitle = "", messageText = "", messageImageUrl = "", iconLiveTv = "", iconMovies = "",
+            iconSeries = "", serverApiUrl = "", dnsUrl = "", testApiUrl = "", epgUrl = "",
+            playlistUrls = emptyList(), apkDownloadUrl = "", apkVersion = "",
+        )
+        repository.loadCached { cached ->
+            runOnUiThread {
+                if (cached != null && cached.totalCount > 0) {
+                    applyCatalogSnapshot(cached, emptyConfig)
+                    if (catalogImportAlreadyStarted && cached.totalCount < 4_000) {
+                        greeting.text = "Olá, usuário  •  lista sendo atualizada..."
+                    }
+                } else {
+                    showCatalogUnavailable("O catálogo inicial está sendo preparado.")
+                }
+            }
+        }
+        if (catalogImportAlreadyStarted) startCatalogImportWatcher()
     }
 
     private fun applyRemoteConfig(config: RemoteAppConfig, catalogImportAlreadyStarted: Boolean = false) {
