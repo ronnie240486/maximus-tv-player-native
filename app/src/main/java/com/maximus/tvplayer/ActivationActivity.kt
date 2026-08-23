@@ -91,7 +91,10 @@ class ActivationActivity : Activity() {
         macFormatted.setOnClickListener { copyMac() }
         findViewById<TextView>(R.id.copyMacButton).setOnClickListener { copyMac() }
         connectButton.setOnClickListener { verifyAccess(true) }
-        verifyButton.setOnClickListener { verifyAccess(true) }
+        verifyButton.setOnClickListener {
+            playlistRepository.invalidateCacheFreshness()
+            verifyAccess(true)
+        }
         extraSettingsButton.setOnClickListener { showExtraSettingsDialog() }
         connectButton.requestFocus()
 

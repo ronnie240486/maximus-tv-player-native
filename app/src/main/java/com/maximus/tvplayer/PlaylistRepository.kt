@@ -32,6 +32,11 @@ class PlaylistRepository(private val context: Context) {
 
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
+        private const val KEY_CACHED_AT = "cached_at_ms"
+        // Janela em que o app confia no catálogo local sem nem consultar a rede.
+        // Evita reimportar listas de dezenas/centenas de milhares de itens a cada
+        // abertura do app só por causa de um HEAD instável no servidor de origem.
+        private const val CACHE_FRESHNESS_WINDOW_MS = 6 * 60 * 60 * 1000L
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
         private val DESCRIPTION_PATTERN = Regex("(?:^|[\\s,])(?:description|tvg-desc|tvg-description|plot|synopsis|summary|overview)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^,\\s]+))", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
@@ -78,7 +83,17 @@ class PlaylistRepository(private val context: Context) {
                 val normalized = normalizeUrls(urls)
                 xtreamSource = normalized.asSequence().mapNotNull(::parseXtreamSource).firstOrNull()
                 val stats = database.stats()
-                if (stats.total > 0 && !sourceChanged(normalized)) {
+                val sameUrls = stats.total > 0 && normalized == savedUrls()
+                if (sameUrls && cacheStillFresh()) {
+                    // Cache confiável recentemente confirmado: abre na hora, sem
+                    // ida à rede nenhuma. Muitos painéis Xtream (get.php) geram a
+                    // lista na hora e não respondem HEAD com ETag/Last-Modified
+                    // estáveis, então checar "mudou?" a cada abertura do app fazia
+                    // reimportar o catálogo inteiro toda vez, mesmo sem mudança
+                    // real -- daqui vem a demora "toda vez" em listas grandes.
+                    onProgress(100)
+                    CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = stats.total, groupCount = stats.groups, databaseBacked = true)
+                } else if (sameUrls && !sourceChanged(normalized)) {
                     onProgress(100)
                     CatalogSnapshot(emptyList(), loadedFromCache = true, totalCount = stats.total, groupCount = stats.groups, databaseBacked = true)
                 } else {
@@ -93,6 +108,14 @@ class PlaylistRepository(private val context: Context) {
             }
             callback(result)
         }
+    }
+
+    /**
+     * Força uma verificação/atualização real na próxima chamada de loadIfChanged,
+     * ignorando a janela de confiança do cache. Útil para o botão VERIFICAR.
+     */
+    fun invalidateCacheFreshness() {
+        metadata.edit().remove(KEY_CACHED_AT).apply()
     }
 
     fun loadCached(callback: (CatalogSnapshot?) -> Unit) {
@@ -275,9 +298,18 @@ class PlaylistRepository(private val context: Context) {
         return ""
     }
 
+    private fun savedUrls(): List<String> = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
+
+    private fun cacheStillFresh(): Boolean {
+        if (metadata.getInt("format_version", 0) != 8) return false
+        val cachedAt = metadata.getLong(KEY_CACHED_AT, 0L)
+        if (cachedAt <= 0L) return false
+        return System.currentTimeMillis() - cachedAt < CACHE_FRESHNESS_WINDOW_MS
+    }
+
     private fun sourceChanged(urls: List<String>): Boolean {
         if (metadata.getInt("format_version", 0) != 8) return true
-        val savedUrls = metadata.getString("urls", "").orEmpty().split('\n').filter { it.isNotBlank() }
+        val savedUrls = savedUrls()
         if (savedUrls != urls) return true
         // Apenas a fonte ativa precisa ser validada no boot. As demais URLs são
         // alternativas de failover e só serão acessadas se a primária falhar.
@@ -288,7 +320,10 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun saveSourceMetadata(urls: List<String>) {
-        val editor = metadata.edit().putInt("format_version", 8).putString("urls", urls.joinToString("\n"))
+        val editor = metadata.edit()
+            .putInt("format_version", 8)
+            .putString("urls", urls.joinToString("\n"))
+            .putLong(KEY_CACHED_AT, System.currentTimeMillis())
         urls.forEach { url -> headSignature(url)?.let { editor.putString("signature_${url.hashCode()}", it) } }
         editor.apply()
     }
