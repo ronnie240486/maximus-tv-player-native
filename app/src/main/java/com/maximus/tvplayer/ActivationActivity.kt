@@ -1,6 +1,7 @@
 package com.maximus.tvplayer
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -11,13 +12,16 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.Locale
 
@@ -26,6 +30,7 @@ class ActivationActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var verifyButton: TextView
     private lateinit var connectButton: TextView
+    private lateinit var extraSettingsButton: TextView
     private lateinit var connectionProgress: ProgressBar
     private lateinit var connectionPercent: TextView
     private lateinit var connectionClock: TextView
@@ -47,7 +52,10 @@ class ActivationActivity : Activity() {
 
     private val periodicCheck = object : Runnable {
         override fun run() {
-            verifyAccess(false)
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            if (prefs.getString(PREF_SOURCE_MODE, SOURCE_PANEL) != SOURCE_MANUAL) {
+                verifyAccess(false)
+            }
             handler.postDelayed(this, 5_000)
         }
     }
@@ -72,6 +80,7 @@ class ActivationActivity : Activity() {
         status = findViewById(R.id.activationStatus)
         verifyButton = findViewById(R.id.recheckButton)
         connectButton = findViewById(R.id.connectButton)
+        extraSettingsButton = findViewById(R.id.extraSettingsButton)
         connectionProgress = findViewById(R.id.connectionProgress)
         connectionPercent = findViewById(R.id.connectionPercent)
         connectionClock = findViewById(R.id.connectionClock)
@@ -83,9 +92,22 @@ class ActivationActivity : Activity() {
         findViewById<TextView>(R.id.copyMacButton).setOnClickListener { copyMac() }
         connectButton.setOnClickListener { verifyAccess(true) }
         verifyButton.setOnClickListener { verifyAccess(true) }
+        extraSettingsButton.setOnClickListener { showExtraSettingsDialog() }
         connectButton.requestFocus()
-        setConnectionProgress(0, "Aguardando conexão com o painel...")
-        verifyAccess(false)
+
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val manualDns = prefs.getString(PREF_MANUAL_DNS, "").orEmpty()
+        val manualUser = prefs.getString(PREF_MANUAL_USER, "").orEmpty()
+        val manualPassword = prefs.getString(PREF_MANUAL_PASSWORD, "").orEmpty()
+        val manualConfigured = manualDns.isNotBlank() && manualUser.isNotBlank() && manualPassword.isNotBlank()
+        if (prefs.getString(PREF_SOURCE_MODE, SOURCE_PANEL) == SOURCE_MANUAL && manualConfigured) {
+            // Configuração extra já salva: conecta direto, sem depender do painel/MAC.
+            setConnectionProgress(0, "Conectando com a configuração extra (DNS/usuário/senha)...")
+            connectManual(manualDns, manualUser, manualPassword, showProgress = false)
+        } else {
+            setConnectionProgress(0, "Aguardando conexão com o painel...")
+            verifyAccess(false)
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -99,6 +121,7 @@ class ActivationActivity : Activity() {
                         findViewById<View>(R.id.copyMacButton),
                         connectButton,
                         verifyButton,
+                        extraSettingsButton,
                     )
                     val current = targets.indexOf(currentFocus).coerceAtLeast(0)
                     val delta = if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1
@@ -150,6 +173,157 @@ class ActivationActivity : Activity() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("MAC do dispositivo", mac))
         Toast.makeText(this, "MAC copiado", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showExtraSettingsDialog() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_extra_settings, null)
+        val dnsInput = view.findViewById<EditText>(R.id.extraDnsInput)
+        val userInput = view.findViewById<EditText>(R.id.extraUserInput)
+        val passwordInput = view.findViewById<EditText>(R.id.extraPasswordInput)
+        val errorLabel = view.findViewById<TextView>(R.id.extraSettingsError)
+        val cancelButton = view.findViewById<TextView>(R.id.extraCancelButton)
+        val confirmButton = view.findViewById<TextView>(R.id.extraConfirmButton)
+        val usePanelButton = view.findViewById<TextView>(R.id.extraUsePanelButton)
+
+        dnsInput.setText(prefs.getString(PREF_MANUAL_DNS, ""))
+        userInput.setText(prefs.getString(PREF_MANUAL_USER, ""))
+        passwordInput.setText(prefs.getString(PREF_MANUAL_PASSWORD, ""))
+
+        val currentlyManual = prefs.getString(PREF_SOURCE_MODE, SOURCE_PANEL) == SOURCE_MANUAL
+        usePanelButton.visibility = if (currentlyManual) View.VISIBLE else View.GONE
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+            .setView(view)
+            .setCancelable(true)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        cancelButton.setOnClickListener { dialog.dismiss() }
+
+        usePanelButton.setOnClickListener {
+            prefs.edit().putString(PREF_SOURCE_MODE, SOURCE_PANEL).apply()
+            dialog.dismiss()
+            Toast.makeText(this, "Usando o painel/MAC novamente", Toast.LENGTH_SHORT).show()
+            verifyAccess(true)
+        }
+
+        confirmButton.setOnClickListener {
+            val dns = normalizeDns(dnsInput.text?.toString().orEmpty())
+            val user = userInput.text?.toString()?.trim().orEmpty()
+            val password = passwordInput.text?.toString()?.trim().orEmpty()
+            if (dns.isBlank() || user.isBlank() || password.isBlank()) {
+                errorLabel.text = "Preencha DNS, usuário e senha."
+                errorLabel.visibility = View.VISIBLE
+                return@setOnClickListener
+            }
+            prefs.edit()
+                .putString(PREF_SOURCE_MODE, SOURCE_MANUAL)
+                .putString(PREF_MANUAL_DNS, dns)
+                .putString(PREF_MANUAL_USER, user)
+                .putString(PREF_MANUAL_PASSWORD, password)
+                .apply()
+            dialog.dismiss()
+            connectManual(dns, user, password, showProgress = true)
+        }
+
+        dialog.show()
+        dnsInput.requestFocus()
+    }
+
+    private fun normalizeDns(raw: String): String {
+        var value = raw.trim().trimEnd('/')
+        if (value.isBlank()) return ""
+        if (!value.contains("://")) value = "http://$value"
+        return value
+    }
+
+    private fun buildXtreamUrl(dns: String, user: String, password: String): String {
+        val encodedUser = URLEncoder.encode(user, "UTF-8")
+        val encodedPassword = URLEncoder.encode(password, "UTF-8")
+        return "$dns/get.php?username=$encodedUser&password=$encodedPassword&type=m3u_plus&output=ts"
+    }
+
+    private fun connectManual(dns: String, user: String, password: String, showProgress: Boolean) {
+        if (checking || loadingPanelList) return
+        checking = true
+        loadingPanelList = true
+        if (showProgress) status.text = "Conectando com a configuração extra..."
+        status.setTextColor(getColor(R.color.text_secondary))
+        setConnectionProgress(15, "Conectando direto por DNS/usuário/senha (sem depender do painel)...")
+        verifyButton.isEnabled = false
+        connectButton.isEnabled = false
+        extraSettingsButton.isEnabled = false
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putBoolean(PREF_IMPORT_IN_PROGRESS, true)
+            .apply()
+        val manualUrl = buildXtreamUrl(dns, user, password)
+        playlistRepository.loadIfChanged(
+            listOf(manualUrl),
+            onProgress = { progress ->
+                runOnUiThread {
+                    setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...")
+                }
+            },
+            onCatalogReady = { stats ->
+                runOnUiThread {
+                    if (!mainOpened && stats.total > 0) {
+                        setConnectionProgress(86, "Catálogo inicial pronto. Organizando o restante em segundo plano...")
+                        status.text = "Catálogo inicial pronto. Abrindo Excellence..."
+                        status.setTextColor(getColor(R.color.success))
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                            .putBoolean(PREF_ACCESS_ALLOWED, true)
+                            .apply()
+                        keepImporterAlive = true
+                        openMainActivity(importInProgress = true)
+                    }
+                }
+            },
+            callback = { playlistResult ->
+                runOnUiThread {
+                    checking = false
+                    loadingPanelList = false
+                    verifyButton.isEnabled = true
+                    connectButton.isEnabled = true
+                    extraSettingsButton.isEnabled = true
+                    playlistResult.onSuccess {
+                        setConnectionProgress(100, "Conectado. Em breve você terá em mãos o melhor conteúdo para assistir.")
+                        status.text = "Catálogo completo."
+                        status.setTextColor(getColor(R.color.success))
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                            .putBoolean(PREF_ACCESS_ALLOWED, true)
+                            .putBoolean(PREF_IMPORT_IN_PROGRESS, false)
+                            .apply()
+                        handler.removeCallbacks(periodicCheck)
+                        if (mainOpened) {
+                            keepImporterAlive = false
+                            playlistRepository.shutdown()
+                            finish()
+                        } else {
+                            openMainActivity(importInProgress = false)
+                        }
+                    }.onFailure {
+                        if (mainOpened) {
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                .putBoolean(PREF_IMPORT_IN_PROGRESS, false)
+                                .apply()
+                            keepImporterAlive = false
+                            playlistRepository.shutdown()
+                            finish()
+                        } else {
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                                .putBoolean(PREF_IMPORT_IN_PROGRESS, false)
+                                .apply()
+                            val reason = it.message.orEmpty()
+                            val message = explainFailure(reason)
+                            setConnectionProgress(40, message)
+                            status.text = message
+                            status.setTextColor(getColor(R.color.warning))
+                        }
+                    }
+                }
+            },
+        )
     }
 
     private fun verifyAccess(showProgress: Boolean) {
@@ -299,6 +473,14 @@ class ActivationActivity : Activity() {
         const val PREF_MAC_ADDRESS = "mac_address"
         const val PREF_IMPORT_IN_PROGRESS = "catalog_import_in_progress"
         private const val PREF_ACCESS_ALLOWED = "access_allowed"
+
+        // Fonte alternativa (DNS/usuário/senha), independente do painel/MAC.
+        const val PREF_SOURCE_MODE = "source_mode"
+        const val PREF_MANUAL_DNS = "manual_dns"
+        const val PREF_MANUAL_USER = "manual_user"
+        const val PREF_MANUAL_PASSWORD = "manual_password"
+        const val SOURCE_PANEL = "panel"
+        const val SOURCE_MANUAL = "manual"
     }
 }
 
