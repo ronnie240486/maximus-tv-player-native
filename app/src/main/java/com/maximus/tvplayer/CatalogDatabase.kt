@@ -328,7 +328,10 @@ class CatalogDatabase(context: Context) {
             // Rede de segurança: se algum ponto ainda esbarrar em um lock breve
             // (ex.: durante o rebuild dos índices ao final da importação, que
             // precisa de acesso exclusivo), espera até 5s em vez de falhar na hora.
-            db.execSQL("PRAGMA busy_timeout=5000")
+            // PRAGMA busy_timeout devolve uma linha de resultado, então precisa
+            // ser executado via rawQuery -- execSQL lança SQLiteException para
+            // qualquer comando que retorne resultado.
+            db.rawQuery("PRAGMA busy_timeout=5000", null)?.use { it.moveToFirst() }
         }
 
         override fun onCreate(db: SQLiteDatabase) {
