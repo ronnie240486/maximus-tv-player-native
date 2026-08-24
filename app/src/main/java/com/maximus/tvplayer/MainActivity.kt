@@ -126,7 +126,7 @@ class MainActivity : Activity() {
     private var miniTrailerView: WebView? = null
     private var radioVisualizer: RadioWaveView? = null
     private var previewMode = PreviewMode.NONE
-    private var previewScale = PreviewScale.NORMAL
+    private var previewScale = PreviewScale.ZOOM
     private var seriesSeasonsDialog: Dialog? = null
     private var seriesEpisodesDialog: Dialog? = null
 
@@ -1682,11 +1682,12 @@ class MainActivity : Activity() {
             return
         }
         stopMiniPlayer()
-        previewScale = PreviewScale.NORMAL
+        previewScale = PreviewScale.ZOOM
         val playerView = PlayerView(this).apply {
             useController = false
             controllerShowTimeoutMs = 0
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             isClickable = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
             isFocusable = false
@@ -1890,7 +1891,7 @@ class MainActivity : Activity() {
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
         previewMode = PreviewMode.TRAILER
-        previewScale = PreviewScale.NORMAL
+        previewScale = PreviewScale.ZOOM
         showPreviewScaleControl()
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
@@ -2070,7 +2071,7 @@ class MainActivity : Activity() {
         }
         radioVisualizer = null
         previewScaleButton.visibility = View.GONE
-        previewScale = PreviewScale.NORMAL
+        previewScale = PreviewScale.ZOOM
         miniPlayer?.release()
         miniPlayer = null
         miniPlayerEntryKey = null
