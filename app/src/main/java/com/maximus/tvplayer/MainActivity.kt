@@ -2244,6 +2244,7 @@ class MainActivity : Activity() {
         // Deriva a URL do EPG a partir das credenciais manuais (padrão Xtream:
         // mesma base do get.php, endpoint xmltv.php). Sem isso, epgUrl ficava
         // sempre em branco e a programação ao vivo nunca aparecia no modo DNS.
+        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
         val manualDns = prefs.getString(ActivationActivity.PREF_MANUAL_DNS, "").orEmpty()
         val manualUser = prefs.getString(ActivationActivity.PREF_MANUAL_USER, "").orEmpty()
         val manualPassword = prefs.getString(ActivationActivity.PREF_MANUAL_PASSWORD, "").orEmpty()
