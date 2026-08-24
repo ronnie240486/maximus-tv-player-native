@@ -19,6 +19,17 @@ class CatalogAdapter(
 ) : RecyclerView.Adapter<CatalogAdapter.Holder>() {
     private var items: List<CatalogEntry> = emptyList()
     private var selectedKey: String? = null
+    private var attachedRecyclerView: RecyclerView? = null
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        attachedRecyclerView = recyclerView
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        if (attachedRecyclerView === recyclerView) attachedRecyclerView = null
+    }
 
     fun submit(items: List<CatalogEntry>, selectedKey: String?) {
         this.items = items
@@ -27,6 +38,28 @@ class CatalogAdapter(
     }
 
     fun positionOf(key: String?): Int = if (key == null) -1 else items.indexOfFirst { it.key == key }
+
+    // Atualiza qual item mostra a borda de selecionado sem recarregar a
+    // lista inteira (isso é o que fazia a borda quase nunca aparecer --
+    // antes só atualizava em submit(), que roda raramente por design, pra
+    // não bagunçar a posição de rolagem). Só chama notifyItemChanged para
+    // posições que já estão de fato visíveis: notificar uma posição fora de
+    // tela (ex.: posição 0, longe depois de rolar rápido) fazia o
+    // RecyclerView/LinearLayoutManager mexer no "ponto de ancoragem" do
+    // layout e arrastar a rolagem de volta pra lá sozinho.
+    fun setSelectedKey(key: String?) {
+        if (key == selectedKey) return
+        val oldPosition = positionOf(selectedKey)
+        selectedKey = key
+        val recyclerView = attachedRecyclerView
+        if (oldPosition >= 0 && recyclerView?.findViewHolderForAdapterPosition(oldPosition) != null) {
+            notifyItemChanged(oldPosition)
+        }
+        val newPosition = positionOf(key)
+        if (newPosition >= 0 && recyclerView?.findViewHolderForAdapterPosition(newPosition) != null) {
+            notifyItemChanged(newPosition)
+        }
+    }
 
     fun append(items: List<CatalogEntry>) {
         if (items.isEmpty()) return
@@ -95,7 +128,7 @@ class CatalogAdapter(
             val isSelected = item.key == selectedKey
             holder.row.background = layered(
                 fill = if (focused) 0x333FE7EF else 0x00111629,
-                strokeColor = if (isSelected) 0xFF4CE8F0 else 0x00000000,
+                strokeColor = if (isSelected) 0xFFFFFFFF else 0x00000000,
                 strokeWidthPx = if (isSelected) 3 else 0,
             )
         }
