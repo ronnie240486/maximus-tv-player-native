@@ -2180,6 +2180,16 @@ class MainActivity : Activity() {
                 }
             }
         }
+        if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) {
+            repository.fetchTmdbRating(entry) { rating ->
+                runOnUiThread {
+                    if (rating == null || selectedEntry?.key != entry.key) return@runOnUiThread
+                    val parts = listOf(entry.groupTitle, entry.year, entry.quality, kindLabel(entry.kind), entry.runtime, "⭐ %.1f".format(rating.score))
+                        .filter { it.isNotBlank() }
+                    detailTags.text = parts.joinToString("   •   ")
+                }
+            }
+        }
     }
 
     private fun renderActions(entry: CatalogEntry) {
@@ -2340,7 +2350,12 @@ class MainActivity : Activity() {
         val initialSynopsis = cachedMeta?.synopsis?.takeIf { it.isNotBlank() } ?: entry.synopsis
         views.title.text = displayTitle
         views.synopsis.text = displaySynopsis(initialSynopsis).ifBlank { "Buscando sinopse..." }
-        views.tags.text = listOf(entry.groupTitle, cachedMeta?.year?.ifBlank { entry.year } ?: entry.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+        var currentYear = cachedMeta?.year?.ifBlank { entry.year } ?: entry.year
+        var ratingSuffix = ""
+        fun refreshTags() {
+            views.tags.text = (listOf(entry.groupTitle, currentYear, kindLabel(entry.kind)).filter { it.isNotBlank() } + listOfNotNull(ratingSuffix.takeIf { it.isNotBlank() })).joinToString("   •   ")
+        }
+        refreshTags()
         val backdropSource = cachedMeta?.backdrop?.ifBlank { entry.backdropUrl }?.ifBlank { entry.logoUrl } ?: entry.backdropUrl.ifBlank { entry.logoUrl }
         imageLoader.load(backdropSource, views.backdrop, fallbackImage)
         var answered = initialSynopsis.isNotBlank()
@@ -2355,11 +2370,19 @@ class MainActivity : Activity() {
             runOnUiThread {
                 answered = true
                 if (metadata != null && metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, views.backdrop, fallbackImage)
-                if (metadata != null && metadata.year.isNotBlank()) views.tags.text = listOf(entry.groupTitle, metadata.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+                if (metadata != null && metadata.year.isNotBlank()) { currentYear = metadata.year; refreshTags() }
                 when {
                     metadata != null && metadata.synopsis.isNotBlank() -> views.synopsis.text = displaySynopsis(metadata.synopsis)
                     entry.synopsis.isNotBlank() -> views.synopsis.text = displaySynopsis(entry.synopsis)
                     else -> views.synopsis.text = "Sinopse não encontrada (${repository.lastMetadataDebug})."
+                }
+            }
+        }
+        repository.fetchTmdbRating(entry) { rating ->
+            runOnUiThread {
+                if (rating != null) {
+                    ratingSuffix = "⭐ %.1f".format(rating.score)
+                    refreshTags()
                 }
             }
         }

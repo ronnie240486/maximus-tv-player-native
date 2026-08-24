@@ -27,6 +27,11 @@ data class EpisodeDetail(
     val plot: String = "",
 )
 
+data class TmdbRating(
+    val score: Double,
+    val voteCount: Int,
+)
+
 class PlaylistRepository(private val context: Context) {
 
     private data class XtreamSource(val baseUrl: String, val username: String, val password: String)
@@ -41,6 +46,7 @@ class PlaylistRepository(private val context: Context) {
     // por tipo, dentro do executor single-thread desta classe.
     private val idLookupCache = mutableMapOf<MediaKind, Map<String, String>>()
     private val episodeDetailsCache = mutableMapOf<String, Map<String, EpisodeDetail>>()
+    private val tmdbRatingCache = mutableMapOf<String, TmdbRating?>()
 
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
@@ -49,6 +55,7 @@ class PlaylistRepository(private val context: Context) {
         // Evita reimportar listas de dezenas/centenas de milhares de itens a cada
         // abertura do app só por causa de um HEAD instável no servidor de origem.
         private const val CACHE_FRESHNESS_WINDOW_MS = 3 * 24 * 60 * 60 * 1000L
+        private const val TMDB_API_KEY = "aad81d5ba22644702893f3a88f6a08c1"
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
         private val DESCRIPTION_PATTERN = Regex("(?:^|[\\s,])(?:description|tvg-desc|tvg-description|plot|synopsis|summary|overview)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^,\\s]+))", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
@@ -316,6 +323,42 @@ class PlaylistRepository(private val context: Context) {
             }
         }
         return result
+    }
+
+    // Busca a nota (media de votos) no TMDB pelo nome do filme/serie. Cache em
+    // memoria por nome normalizado, ja que o TMDB nao faz parte do catalogo
+    // do provedor -- e uma fonte externa, buscada sob demanda (nao da pra
+    // buscar pra todo o catalogo de uma vez, seria lento e estouraria limite
+    // de requisicoes).
+    fun fetchTmdbRating(entry: CatalogEntry, callback: (TmdbRating?) -> Unit) {
+        val title = if (entry.kind == MediaKind.SERIES) entry.seriesGroup.ifBlank { entry.name } else entry.name
+        val cacheKey = normalizeMetadataName(title)
+        if (cacheKey.isBlank()) { callback(null); return }
+        if (tmdbRatingCache.containsKey(cacheKey)) { callback(tmdbRatingCache[cacheKey]); return }
+        executor.execute {
+            val rating = runCatching { fetchTmdbRatingInternal(entry, title) }.getOrNull()
+            tmdbRatingCache[cacheKey] = rating
+            callback(rating)
+        }
+    }
+
+    private fun fetchTmdbRatingInternal(entry: CatalogEntry, title: String): TmdbRating? {
+        val cleanTitle = normalizeMetadataName(title).ifBlank { return null }
+        val endpoint = if (entry.kind == MediaKind.SERIES) "tv" else "movie"
+        val url = Uri.parse("https://api.themoviedb.org/3/search/$endpoint").buildUpon()
+            .appendQueryParameter("api_key", TMDB_API_KEY)
+            .appendQueryParameter("language", "pt-BR")
+            .appendQueryParameter("query", cleanTitle)
+            .also { if (entry.year.isNotBlank()) it.appendQueryParameter(if (endpoint == "tv") "first_air_date_year" else "year", entry.year.take(4)) }
+            .build().toString()
+        val root = requestJson(url) ?: return null
+        val results = root.optJSONArray("results") ?: return null
+        if (results.length() == 0) return null
+        val best = results.optJSONObject(0) ?: return null
+        val score = best.optDouble("vote_average", 0.0)
+        val votes = best.optInt("vote_count", 0)
+        if (score <= 0.0) return null
+        return TmdbRating(score = score, voteCount = votes)
     }
 
     private fun extractProviderId(streamUrl: String): String = runCatching {
