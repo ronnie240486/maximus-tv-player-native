@@ -160,7 +160,7 @@ class CatalogDatabase(context: Context) {
         // "Nota" ainda cai pra "recentes" até termos as notas do TMDB.
         val order = when (sortMode) {
             SortMode.ALPHABETICAL -> "is_adult ASC, name COLLATE NOCASE ASC"
-            SortMode.RECENT, SortMode.RATING -> "is_adult ASC, rowid DESC"
+            SortMode.RECENT, SortMode.RATING -> "is_adult ASC, rowid ASC"
         }
         val sql = "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
@@ -176,7 +176,7 @@ class CatalogDatabase(context: Context) {
         val sourceIdentity = "LOWER(TRIM(CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END))"
         val cardOrder = when (sortMode) {
             SortMode.ALPHABETICAL -> "card.is_adult ASC, card.name COLLATE NOCASE ASC"
-            SortMode.RECENT, SortMode.RATING -> "card.is_adult ASC, card.rowid DESC"
+            SortMode.RECENT, SortMode.RATING -> "card.is_adult ASC, card.rowid ASC"
         }
         val sql = "SELECT card.* FROM $TABLE card INNER JOIN (" +
             "SELECT MIN(source.rowid) AS first_rowid FROM $TABLE source WHERE $sourceFilter GROUP BY $sourceIdentity" +
