@@ -90,7 +90,12 @@ class CatalogAdapter(
         holder.row.tag = item.key
         imageLoader.load(item.logoUrl, holder.logo, fallbackLogo(item))
         fun paint(focused: Boolean) {
-            holder.row.background = rounded(if (focused || item.key == selectedKey) 0x333FE7EF else 0x00111629, 10f)
+            val isSelected = item.key == selectedKey
+            holder.row.background = layered(
+                fill = if (focused) 0x333FE7EF else 0x00111629,
+                strokeColor = if (isSelected) 0xFF4CE8F0 else 0x00000000,
+                strokeWidthPx = if (isSelected) 3 else 0,
+            )
         }
         paint(holder.row.hasFocus())
         holder.row.setOnFocusChangeListener { _, hasFocus ->
@@ -115,5 +120,13 @@ class CatalogAdapter(
     private fun rounded(color: Long, radius: Float): GradientDrawable = GradientDrawable().apply {
         setColor(Color.argb((color shr 24 and 0xFF).toInt(), (color shr 16 and 0xFF).toInt(), (color shr 8 and 0xFF).toInt(), (color and 0xFF).toInt()))
         cornerRadius = radius
+    }
+
+    private fun layered(fill: Long, strokeColor: Long, strokeWidthPx: Int): GradientDrawable = GradientDrawable().apply {
+        setColor(Color.argb((fill shr 24 and 0xFF).toInt(), (fill shr 16 and 0xFF).toInt(), (fill shr 8 and 0xFF).toInt(), (fill and 0xFF).toInt()))
+        cornerRadius = 10f
+        if (strokeWidthPx > 0) {
+            setStroke(strokeWidthPx, Color.argb((strokeColor shr 24 and 0xFF).toInt(), (strokeColor shr 16 and 0xFF).toInt(), (strokeColor shr 8 and 0xFF).toInt(), (strokeColor and 0xFF).toInt()))
+        }
     }
 }

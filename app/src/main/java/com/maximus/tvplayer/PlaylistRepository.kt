@@ -48,7 +48,7 @@ class PlaylistRepository(private val context: Context) {
         // Janela em que o app confia no catálogo local sem nem consultar a rede.
         // Evita reimportar listas de dezenas/centenas de milhares de itens a cada
         // abertura do app só por causa de um HEAD instável no servidor de origem.
-        private const val CACHE_FRESHNESS_WINDOW_MS = 6 * 60 * 60 * 1000L
+        private const val CACHE_FRESHNESS_WINDOW_MS = 3 * 24 * 60 * 60 * 1000L
         private val SAME_LINE_URL_PATTERN = Regex("\\s+(https?://\\S+)$")
         private val DESCRIPTION_PATTERN = Regex("(?:^|[\\s,])(?:description|tvg-desc|tvg-description|plot|synopsis|summary|overview)\\s*=\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^,\\s]+))", RegexOption.IGNORE_CASE)
         private val QUALITY_PATTERN = Regex("\\b(4K|UHD|FHD|HD|SD)\\b", RegexOption.IGNORE_CASE)
@@ -348,8 +348,8 @@ class PlaylistRepository(private val context: Context) {
 
     private fun requestJson(endpoint: String): JSONObject? = runCatching {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 20_000
+            connectTimeout = 6_000
+            readTimeout = 8_000
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
         }

@@ -243,11 +243,13 @@ class CatalogDatabase(context: Context) {
         val db = helper.readableDatabase
         val where = mutableListOf("kind=?", "series_group=?")
         val args = mutableListOf(MediaKind.SERIES.name, seriesGroup)
-        when {
-            group == ContentSafety.LOCKED_CATEGORY -> where += if (includeAdult) "is_adult=1" else "0"
-            group != "Todos" -> { where += "group_title=? AND is_adult=0"; args += group }
-            !includeAdult -> where += "is_adult=0"
-        }
+        // Não filtra por group_title aqui: um mesmo seriado pode ter
+        // temporadas espalhadas em categorias diferentes no catálogo do
+        // provedor (ex.: temporada nova numa categoria "Lançamentos" separada)
+        // -- filtrar por categoria escondia temporadas inteiras.
+        where += if (group == ContentSafety.LOCKED_CATEGORY) {
+            if (includeAdult) "is_adult=1" else "0"
+        } else if (!includeAdult) "is_adult=0" else "1=1"
         if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
         val seasonExpr = "CASE WHEN TRIM(season) = '' THEN '1' ELSE season END"
         val sql = "SELECT DISTINCT $seasonExpr AS season_value FROM $TABLE WHERE ${where.joinToString(" AND ")} ORDER BY CAST($seasonExpr AS INTEGER), season_value"
@@ -265,11 +267,10 @@ class CatalogDatabase(context: Context) {
         val seasonExpr = "CASE WHEN TRIM(season) = '' THEN '1' ELSE season END"
         where += "$seasonExpr=?"
         args += season
-        when {
-            group == ContentSafety.LOCKED_CATEGORY -> where += if (includeAdult) "is_adult=1" else "0"
-            group != "Todos" -> { where += "group_title=? AND is_adult=0"; args += group }
-            !includeAdult -> where += "is_adult=0"
-        }
+        // Mesmo motivo do querySeriesSeasons: não restringe por group_title.
+        where += if (group == ContentSafety.LOCKED_CATEGORY) {
+            if (includeAdult) "is_adult=1" else "0"
+        } else if (!includeAdult) "is_adult=0" else "1=1"
         if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
         val sql = "SELECT * FROM $TABLE WHERE ${where.joinToString(" AND ")} ORDER BY CAST(NULLIF(episode, '') AS INTEGER), name COLLATE NOCASE"
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
