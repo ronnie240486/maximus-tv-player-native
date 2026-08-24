@@ -1776,10 +1776,31 @@ class MainActivity : Activity() {
                     'ytm-slim-owner-renderer,.watch-below-the-player,#comments,ytm-comments-entry-point-header-renderer,'+
                     'ytm-item-section-renderer,#related,.ytm-video-metadata-renderer,.miniplayer-toggle-button-container,'+
                     'ytm-video-action-bar-renderer,.video-ads,.ytp-ce-element,.ytp-pause-overlay,.ytp-endscreen-content,'+
-                    'ytm-single-column-watch-next-results-renderer,ytm-watch-metadata,#player-container-id ~ *'+
+                    'ytm-single-column-watch-next-results-renderer,ytm-watch-metadata'+
                     '{display:none !important;}'+
-                    'html,body{background:#000 !important;overflow:hidden !important;margin:0 !important;padding:0 !important;}'+
-                    '#player-container-id,#player,.html5-video-player,#movie_player{position:fixed !important;top:0 !important;left:0 !important;width:100% !important;height:100% !important;z-index:9999 !important;}';
+                    'html,body{background:#000 !important;overflow:hidden !important;margin:0 !important;padding:0 !important;}';
+                // Em vez de depender de nomes de classe/ID do YouTube (que mudam com
+                // frequencia), sobe a partir do proprio elemento <video> -- que sempre
+                // existe -- forcando ele e alguns niveis de pai a ocupar a tela toda.
+                // Isso e o que faz o video realmente preencher o espaco, nao so
+                // esconder o resto da pagina.
+                var v=document.querySelector('video');
+                if(v){
+                    var el=v;
+                    for(var i=0;i<6&&el&&el!==document.body;i++){
+                        el.style.setProperty('position','fixed','important');
+                        el.style.setProperty('top','0','important');
+                        el.style.setProperty('left','0','important');
+                        el.style.setProperty('width','100vw','important');
+                        el.style.setProperty('height','100vh','important');
+                        el.style.setProperty('max-width','none','important');
+                        el.style.setProperty('max-height','none','important');
+                        el.style.setProperty('margin','0','important');
+                        el.style.setProperty('z-index','999999','important');
+                        el=el.parentElement;
+                    }
+                    v.style.setProperty('object-fit','contain','important');
+                }
             })()""".trimIndent(),
             null,
         )
