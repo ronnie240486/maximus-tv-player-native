@@ -2164,7 +2164,8 @@ class MainActivity : Activity() {
                 if (!focusSelectedCatalogItem()) {
                     val key = selectedEntry?.key
                     val position = catalogAdapter.positionOf(key)
-                    Toast.makeText(this, "DIAG2: falhou (key=$key pos=$position itens=${catalogAdapter.itemCount})", Toast.LENGTH_LONG).show()
+                    val keySuffix = key?.takeLast(24) ?: "null"
+                    Toast.makeText(this, "DIAG2: pos=$position itens=${catalogAdapter.itemCount} key...$keySuffix", Toast.LENGTH_LONG).show()
                     focusFirstCatalogItem()
                 }
             }
