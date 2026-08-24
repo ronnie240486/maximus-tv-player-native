@@ -3480,7 +3480,7 @@ class MainActivity : Activity() {
             }
         }
         kinds.forEachIndexed { index, kind ->
-            repository.queryPage(kind, "Todos", spokenQuery, hidden, emptySet(), false, 1, 0, includeAdult = parentalUnlocked) { results ->
+            repository.queryPage(kind, "Todos", spokenQuery, hidden, emptySet(), SortMode.RECENT, 1, 0, includeAdult = parentalUnlocked) { results ->
                 runOnUiThread {
                     found[index] = results.firstOrNull()
                     finish()
