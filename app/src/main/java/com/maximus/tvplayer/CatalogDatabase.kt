@@ -132,13 +132,13 @@ class CatalogDatabase(context: Context) {
         search: String,
         hidden: Set<String>,
         favorites: Set<String>,
-        sortAlphabetically: Boolean,
+        sortMode: SortMode,
         limit: Int,
         offset: Int,
         seriesOnly: Boolean = false,
         includeAdult: Boolean = false,
     ): List<CatalogEntry> {
-        if (seriesOnly) return querySeriesPage(group, search, hidden, sortAlphabetically, limit, offset, includeAdult)
+        if (seriesOnly) return querySeriesPage(group, search, hidden, sortMode, limit, offset, includeAdult)
         if (kind == null && favorites.isEmpty()) return emptyList()
         val db = helper.readableDatabase
         val where = mutableListOf<String>()
@@ -157,7 +157,11 @@ class CatalogDatabase(context: Context) {
         if (hidden.isNotEmpty()) where += "UPPER(group_title) NOT IN (${hidden.joinToString(",") { "?" }})".also { args.addAll(hidden.map(String::uppercase)) }
         if (favorites.isNotEmpty()) where += "item_key IN (${favorites.joinToString(",") { "?" }})".also { args.addAll(favorites) }
         val selection = if (where.isEmpty()) "" else "WHERE ${where.joinToString(" AND ")}"
-        val order = if (sortAlphabetically) "is_adult ASC, name COLLATE NOCASE ASC" else "is_adult ASC, rowid ASC"
+        // "Nota" ainda cai pra "recentes" até termos as notas do TMDB.
+        val order = when (sortMode) {
+            SortMode.ALPHABETICAL -> "is_adult ASC, name COLLATE NOCASE ASC"
+            SortMode.RECENT, SortMode.RATING -> "is_adult ASC, rowid DESC"
+        }
         val sql = "SELECT * FROM $TABLE $selection ORDER BY $order LIMIT $limit OFFSET $offset"
         return db.rawQuery(sql, args.toTypedArray()).use { cursor ->
             buildList {
@@ -166,11 +170,14 @@ class CatalogDatabase(context: Context) {
         }
     }
 
-    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortAlphabetically: Boolean, limit: Int, offset: Int, includeAdult: Boolean): List<CatalogEntry> {
+    private fun querySeriesPage(group: String, search: String, hidden: Set<String>, sortMode: SortMode, limit: Int, offset: Int, includeAdult: Boolean): List<CatalogEntry> {
         val db = helper.readableDatabase
         val (sourceFilter, sourceArgs) = seriesFilter("source", group, search, hidden, includeAdult)
         val sourceIdentity = "LOWER(TRIM(CASE WHEN TRIM(source.series_group) <> '' THEN source.series_group ELSE source.name END))"
-        val cardOrder = if (sortAlphabetically) "card.is_adult ASC, card.name COLLATE NOCASE ASC" else "card.is_adult ASC, card.rowid ASC"
+        val cardOrder = when (sortMode) {
+            SortMode.ALPHABETICAL -> "card.is_adult ASC, card.name COLLATE NOCASE ASC"
+            SortMode.RECENT, SortMode.RATING -> "card.is_adult ASC, card.rowid DESC"
+        }
         val sql = "SELECT card.* FROM $TABLE card INNER JOIN (" +
             "SELECT MIN(source.rowid) AS first_rowid FROM $TABLE source WHERE $sourceFilter GROUP BY $sourceIdentity" +
             ") roots ON card.rowid = roots.first_rowid ORDER BY $cardOrder LIMIT $limit OFFSET $offset"
@@ -182,7 +189,7 @@ class CatalogDatabase(context: Context) {
             }
         }.getOrDefault(emptyList())
         if (grouped.isNotEmpty()) return grouped
-        return queryPage(MediaKind.SERIES, group, search, hidden, emptySet(), sortAlphabetically, limit, offset, false, includeAdult)
+        return queryPage(MediaKind.SERIES, group, search, hidden, emptySet(), sortMode, limit, offset, false, includeAdult)
     }
 
     private fun seriesFilter(alias: String, group: String, search: String, hidden: Set<String>, includeAdult: Boolean): Pair<String, List<String>> {
@@ -202,8 +209,8 @@ class CatalogDatabase(context: Context) {
         return where.joinToString(" AND ") to args
     }
 
-    fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =
-        queryPage(kind, group, search, hidden, favorites, sortAlphabetically, 1, 0).firstOrNull()
+    fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortMode: SortMode): CatalogEntry? =
+        queryPage(kind, group, search, hidden, favorites, sortMode, 1, 0).firstOrNull()
 
     // "Mais recente" aqui é uma aproximação pela ordem de inserção (rowid),
     // já que o M3U/Xtream importado não carrega uma data real de quando o
