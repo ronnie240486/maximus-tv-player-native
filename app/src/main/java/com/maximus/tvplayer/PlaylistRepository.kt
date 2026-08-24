@@ -318,7 +318,10 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun extractProviderId(streamUrl: String): String = runCatching {
-        Uri.parse(streamUrl).pathSegments.asReversed().firstOrNull { segment -> segment.substringBeforeLast('.').all(Char::isDigit) }.orEmpty()
+        Uri.parse(streamUrl).pathSegments.asReversed()
+            .firstOrNull { segment -> segment.substringBeforeLast('.').all(Char::isDigit) && segment.substringBeforeLast('.').isNotBlank() }
+            ?.substringBeforeLast('.')
+            .orEmpty()
     }.getOrDefault("")
 
     private fun resolveProviderId(source: XtreamSource, entry: CatalogEntry): String {
