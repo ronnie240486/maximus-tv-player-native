@@ -1527,7 +1527,7 @@ class MainActivity : Activity() {
             return
         }
         if (sameEntry && previewMode == PreviewMode.TRAILER) {
-            startContentPreview(entry)
+            showMovieFullScreen(entry)
             return
         }
         if (sameEntry && previewMode == PreviewMode.CONTENT) {
@@ -2074,7 +2074,7 @@ class MainActivity : Activity() {
         actions += primaryLabel to {
             val sameEntry = miniPlayerEntryKey == entry.key
             when {
-                sameEntry && previewMode == PreviewMode.TRAILER -> if (isSeriesRoot) showSeriesSeasonsDialog(entry) else startContentPreview(entry)
+                sameEntry && previewMode == PreviewMode.TRAILER -> if (isSeriesRoot) showSeriesSeasonsDialog(entry) else showMovieFullScreen(entry)
                 sameEntry && previewMode == PreviewMode.CONTENT -> expandMiniPlayer()
                 isSeriesRoot -> startTrailerPreview(entry)
                 entry.kind == MediaKind.MOVIE -> startTrailerPreview(entry)
@@ -2144,6 +2144,146 @@ class MainActivity : Activity() {
             putExtra(PlayerActivity.EXTRA_URL, entry.streamUrl)
             putExtra(PlayerActivity.EXTRA_MAC, getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_MAC_ADDRESS, "").orEmpty())
         })
+    }
+
+    // Cabecalho comum (fundo com imagem, titulo, tags, sinopse, botao voltar)
+    // usado tanto na tela cheia de filme quanto na de serie.
+    private class DetailHeaderViews(
+        val header: FrameLayout,
+        val backdrop: ImageView,
+        val title: TextView,
+        val tags: TextView,
+        val synopsis: TextView,
+        val backButton: TextView,
+    )
+
+    private fun buildDetailHeader(heightDp: Int): DetailHeaderViews {
+        val header = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, dp(heightDp))
+        }
+        val backdrop = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+        }
+        val shade = View(this).apply {
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x00000000, 0xE6070B15.toInt()))
+        }
+        val textBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(28), 0, dp(28), dp(20)) }
+        }
+        val title = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 26f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        val tags = TextView(this).apply {
+            setTextColor(Color.rgb(143, 155, 184))
+            textSize = 12f
+            setPadding(0, dp(4), 0, dp(10))
+        }
+        val synopsis = TextView(this).apply {
+            setTextColor(Color.rgb(200, 208, 224))
+            textSize = 13f
+            maxLines = 5
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        textBlock.addView(title)
+        textBlock.addView(tags)
+        textBlock.addView(synopsis)
+        val backButton = TextView(this).apply {
+            text = "‹  VOLTAR"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            isFocusable = true
+            isClickable = true
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            background = rounded(0xCC101827, 10f)
+            layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(20), dp(18), 0, 0) }
+        }
+        header.addView(backdrop)
+        header.addView(shade)
+        header.addView(textBlock)
+        header.addView(backButton)
+        return DetailHeaderViews(header, backdrop, title, tags, synopsis, backButton)
+    }
+
+    private fun fillDetailHeader(views: DetailHeaderViews, entry: CatalogEntry, displayTitle: String, fallbackImage: Int) {
+        val cachedMeta = enrichedMetadata[entry.key]
+        val initialSynopsis = cachedMeta?.synopsis?.takeIf { it.isNotBlank() } ?: entry.synopsis
+        views.title.text = displayTitle
+        views.synopsis.text = displaySynopsis(initialSynopsis).ifBlank { "Buscando sinopse..." }
+        views.tags.text = listOf(entry.groupTitle, cachedMeta?.year?.ifBlank { entry.year } ?: entry.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+        val backdropSource = cachedMeta?.backdrop?.ifBlank { entry.backdropUrl }?.ifBlank { entry.logoUrl } ?: entry.backdropUrl.ifBlank { entry.logoUrl }
+        imageLoader.load(backdropSource, views.backdrop, fallbackImage)
+        repository.enrichMetadata(entry) { metadata ->
+            runOnUiThread {
+                if (metadata != null) {
+                    if (metadata.synopsis.isNotBlank()) views.synopsis.text = displaySynopsis(metadata.synopsis)
+                    if (metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, views.backdrop, fallbackImage)
+                    if (metadata.year.isNotBlank()) views.tags.text = listOf(entry.groupTitle, metadata.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+                } else if (entry.synopsis.isBlank()) {
+                    views.synopsis.text = "Sinopse não informada na lista do painel."
+                }
+            }
+        }
+    }
+
+    private fun showMovieFullScreen(entry: CatalogEntry) {
+        if (ContentSafety.isAdult(entry) && !parentalUnlocked) {
+            requestAdultAccess { showMovieFullScreen(entry) }
+            return
+        }
+        val headerViews = buildDetailHeader(360)
+        val scroll = ScrollView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            isFillViewport = true
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+        val watchButton = TextView(this).apply {
+            text = "▶  ASSISTIR"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            isFocusable = true
+            isClickable = true
+            background = actionButtonBackground(primary = true, focused = false)
+            layoutParams = LinearLayout.LayoutParams(dp(200), dp(48)).apply { setMargins(dp(28), dp(18), dp(28), dp(8)) }
+            setOnFocusChangeListener { _, hasFocus -> background = actionButtonBackground(primary = true, focused = hasFocus) }
+        }
+        val castLabel = TextView(this).apply {
+            text = "ELENCO"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(28), dp(14), dp(28), dp(4))
+        }
+        val castText = TextView(this).apply {
+            text = entry.cast.ifBlank { "Elenco não informado na lista do painel." }
+            setTextColor(Color.rgb(180, 188, 208))
+            textSize = 12.5f
+            setPadding(dp(28), 0, dp(28), dp(28))
+        }
+        content.addView(headerViews.header)
+        content.addView(watchButton)
+        content.addView(castLabel)
+        content.addView(castText)
+        scroll.addView(content)
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); addView(scroll) }
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply { setContentView(root) }
+        watchButton.setOnClickListener { dialog.dismiss(); openEntry(entry) }
+        headerViews.backButton.setOnClickListener { dialog.dismiss() }
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) { dialog.dismiss(); true } else false
+        }
+        dialog.show()
+        watchButton.post { watchButton.requestFocus() }
+        fillDetailHeader(headerViews, entry, entry.name, fallbackHero(entry))
     }
 
     private fun showSeriesSeasonsDialog(entry: CatalogEntry) {
