@@ -2140,21 +2140,19 @@ class MainActivity : Activity() {
 
     private fun enrichEntryMetadata(entry: CatalogEntry) {
         repository.enrichMetadata(entry) { metadata ->
-            if (metadata == null) {
-                runOnUiThread {
-                    if (selectedEntry?.key == entry.key && (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) && entry.synopsis.isBlank()) {
-                        detailDescription.text = "Sinopse não informada na lista do painel."
-                    }
-                }
-                return@enrichMetadata
-            }
             runOnUiThread {
-                if (metadata.synopsis.isNotBlank() || metadata.year.isNotBlank() || metadata.backdrop.isNotBlank() || metadata.trailer.isNotBlank()) {
+                if (metadata != null && (metadata.synopsis.isNotBlank() || metadata.year.isNotBlank() || metadata.backdrop.isNotBlank() || metadata.trailer.isNotBlank())) {
                     enrichedMetadata[entry.key] = metadata
                 }
                 if (selectedEntry?.key != entry.key) return@runOnUiThread
-                if (metadata.synopsis.isNotBlank()) detailDescription.text = displaySynopsis(metadata.synopsis)
-                if (metadata.year.isNotBlank() || metadata.backdrop.isNotBlank()) {
+                if (metadata != null && metadata.synopsis.isNotBlank()) {
+                    detailDescription.text = displaySynopsis(metadata.synopsis)
+                } else if (entry.synopsis.isNotBlank()) {
+                    detailDescription.text = displaySynopsis(entry.synopsis)
+                } else if (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES) {
+                    detailDescription.text = "Sinopse não encontrada (${repository.lastMetadataDebug})."
+                }
+                if (metadata != null && (metadata.year.isNotBlank() || metadata.backdrop.isNotBlank())) {
                     val parts = listOf(entry.groupTitle, metadata.year.ifBlank { entry.year }, entry.quality, kindLabel(entry.kind), entry.runtime)
                         .filter { it.isNotBlank() }
                     detailTags.text = parts.joinToString("   •   ")
@@ -2336,12 +2334,12 @@ class MainActivity : Activity() {
         repository.enrichMetadata(entry) { metadata ->
             runOnUiThread {
                 answered = true
-                if (metadata != null) {
-                    if (metadata.synopsis.isNotBlank()) views.synopsis.text = displaySynopsis(metadata.synopsis)
-                    if (metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, views.backdrop, fallbackImage)
-                    if (metadata.year.isNotBlank()) views.tags.text = listOf(entry.groupTitle, metadata.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
-                } else if (entry.synopsis.isBlank()) {
-                    views.synopsis.text = "Sinopse não informada na lista do painel."
+                if (metadata != null && metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, views.backdrop, fallbackImage)
+                if (metadata != null && metadata.year.isNotBlank()) views.tags.text = listOf(entry.groupTitle, metadata.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+                when {
+                    metadata != null && metadata.synopsis.isNotBlank() -> views.synopsis.text = displaySynopsis(metadata.synopsis)
+                    entry.synopsis.isNotBlank() -> views.synopsis.text = displaySynopsis(entry.synopsis)
+                    else -> views.synopsis.text = "Sinopse não encontrada (${repository.lastMetadataDebug})."
                 }
             }
         }
