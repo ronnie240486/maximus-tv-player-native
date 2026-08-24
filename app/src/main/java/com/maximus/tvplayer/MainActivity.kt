@@ -1338,8 +1338,18 @@ class MainActivity : Activity() {
                 }
                 pagedItems.addAll(page)
                 if (offset == 0) {
+                    val layoutManager = channelList.layoutManager as? LinearLayoutManager
+                    val anchorPosition = layoutManager?.findFirstVisibleItemPosition()?.takeIf { it != RecyclerView.NO_POSITION }
+                    val anchorOffset = anchorPosition?.let { layoutManager.findViewByPosition(it)?.top }
                     catalogAdapter.submit(pagedItems.toList(), selectedEntry?.key)
-                    channelList.post { configureExplicitFocusGraph() }
+                    channelList.post {
+                        configureExplicitFocusGraph()
+                        // Restaura a posição de rolagem em vez de deixar a lista pular
+                        // pro início toda vez que essa página inicial é resubmetida.
+                        if (anchorPosition != null && anchorPosition < pagedItems.size) {
+                            layoutManager?.scrollToPositionWithOffset(anchorPosition, anchorOffset ?: 0)
+                        }
+                    }
                     if (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key }) selectEntry(page.first(), false)
                     if (focusCatalogWhenReady) {
                         focusCatalogWhenReady = false
@@ -1668,7 +1678,7 @@ class MainActivity : Activity() {
                 super.onPageFinished(view, url)
                 if (view == null || url?.contains("youtube", true) != true) return
                 if (resolved) {
-                    if (trailerAudioEnabled()) view.postDelayed({ enableYoutubeAudio(view) }, 1_200L)
+                    view.postDelayed({ hideYoutubeChrome(view); if (trailerAudioEnabled()) enableYoutubeAudio(view) }, 1_200L)
                 } else {
                     view.postDelayed({ resolveFirstResult(view, 0) }, 1_200L)
                 }
@@ -1697,11 +1707,12 @@ class MainActivity : Activity() {
 
     private fun youtubeVideoPageUrl(videoId: String): String {
         val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        // Endpoint oficial de embed: vem só com o player, sem cabeçalho, canal,
-        // inscrever-se, comentários, etc -- mais confiável do que tentar
-        // esconder pedaços da página completa do YouTube via CSS, cuja
-        // estrutura muda com frequência.
-        return "https://www.youtube-nocookie.com/embed/$safeId?autoplay=1&playsinline=1&mute=0&rel=0&controls=1&modestbranding=1&iv_load_policy=3&fs=0"
+        // Usa a pagina "watch" normal em vez do endpoint /embed/: o embed falha
+        // (tela de "video indisponivel") em qualquer video que o dono tenha
+        // desativado para incorporacao em outros sites -- bem comum em
+        // trailers oficiais de estudio. A pagina watch sempre funciona; a
+        // interface extra do YouTube e escondida via CSS (hideYoutubeChrome).
+        return "https://www.youtube.com/watch?v=$safeId&autoplay=1&playsinline=1&mute=0&rel=0"
     }
 
     private fun loadYoutubeVideoPage(webView: WebView, videoId: String) {
@@ -1804,7 +1815,7 @@ class MainActivity : Activity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                if (view != null && url?.contains("youtube", true) == true && trailerAudioEnabled()) view.postDelayed({ enableYoutubeAudio(view) }, 1_000L)
+                if (view != null && url?.contains("youtube", true) == true) view.postDelayed({ hideYoutubeChrome(view); if (trailerAudioEnabled()) enableYoutubeAudio(view) }, 1_000L)
             }
         }
         loadYoutubeVideoPage(webView, videoId)
