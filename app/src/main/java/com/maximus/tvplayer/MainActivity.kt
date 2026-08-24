@@ -1420,6 +1420,11 @@ class MainActivity : Activity() {
                 }
                 pagedItems.addAll(page)
                 if (offset == 0) {
+                    // DIAGNOSTICO TEMPORARIO: esse branch (recarregar do zero) so
+                    // deveria rodar em troca de categoria/secao. Se aparecer durante
+                    // navegacao normal, confirma que algo dispara um recarregamento
+                    // completo inesperado, arrastando a rolagem de volta.
+                    Toast.makeText(this@MainActivity, "DIAG: lista recarregada do zero (${page.size} itens)", Toast.LENGTH_SHORT).show()
                     val layoutManager = channelList.layoutManager as? LinearLayoutManager
                     val anchorPosition = layoutManager?.findFirstVisibleItemPosition()?.takeIf { it != RecyclerView.NO_POSITION }
                     val anchorOffset = anchorPosition?.let { layoutManager.findViewByPosition(it)?.top }
@@ -2132,7 +2137,10 @@ class MainActivity : Activity() {
         if (requestFocus) {
             channelList.post {
                 configureExplicitFocusGraph()
-                focusSelectedCatalogItem() || focusFirstCatalogItem()
+                if (!focusSelectedCatalogItem()) {
+                    Toast.makeText(this, "DIAG: focusSelectedCatalogItem falhou, indo pro primeiro item", Toast.LENGTH_SHORT).show()
+                    focusFirstCatalogItem()
+                }
             }
         } else {
             channelList.post { configureExplicitFocusGraph() }
