@@ -967,7 +967,7 @@ class MainActivity : Activity() {
                 clipChildren = false
                 clipToPadding = false
                 setPadding(0, 6, 0, 6)
-                layoutParams = LinearLayout.LayoutParams(-1, 172).apply { setMargins(4, 8, 4, 8) }
+                layoutParams = LinearLayout.LayoutParams(-1, 120).apply { setMargins(4, 6, 4, 6) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -989,16 +989,16 @@ class MainActivity : Activity() {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 alpha = if (isNavigationSelected(label)) 1f else 0.72f
                 background = null
-                layoutParams = LinearLayout.LayoutParams(105, 105).apply { setMargins(0, 0, 0, 6) }
+                layoutParams = LinearLayout.LayoutParams(60, 60).apply { setMargins(0, 0, 0, 5) }
                 setPadding(0, 0, 0, 0)
             }
             caption = TextView(this).apply {
                 text = captionText
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                textSize = 10.5f
+                textSize = 9f
                 setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 32)
+                layoutParams = LinearLayout.LayoutParams(-1, 26)
             }
             row.addView(icon)
             row.addView(caption)
@@ -2161,7 +2161,12 @@ class MainActivity : Activity() {
         if (requestFocus) {
             channelList.post {
                 configureExplicitFocusGraph()
-                focusSelectedCatalogItem() || focusFirstCatalogItem()
+                if (!focusSelectedCatalogItem()) {
+                    val key = selectedEntry?.key
+                    val position = catalogAdapter.positionOf(key)
+                    Toast.makeText(this, "DIAG2: falhou (key=$key pos=$position itens=${catalogAdapter.itemCount})", Toast.LENGTH_LONG).show()
+                    focusFirstCatalogItem()
+                }
             }
         } else {
             channelList.post { configureExplicitFocusGraph() }
