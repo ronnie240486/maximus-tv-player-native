@@ -1223,7 +1223,7 @@ class MainActivity : Activity() {
                 id = View.generateViewId()
                 text = category
                 gravity = Gravity.CENTER
-                textSize = 10f
+                textSize = 13f
                 isFocusable = true
                 isClickable = true
                 setPadding(12, 7, 12, 7)
@@ -1682,6 +1682,30 @@ class MainActivity : Activity() {
             })()""".trimIndent(),
             null,
         )
+        hideYoutubeChrome(webView)
+    }
+
+    // Esconde tudo da pagina do YouTube que nao seja o video em si (cabecalho,
+    // nome do canal, inscrever-se, curtidas, banner "Abrir app", comentarios,
+    // sugestoes) e faz o player ocupar o espaco inteiro.
+    private fun hideYoutubeChrome(webView: WebView) {
+        webView.evaluateJavascript(
+            """(function(){
+                var s=document.getElementById('excellence-hide-chrome');
+                if(!s){s=document.createElement('style');s.id='excellence-hide-chrome';document.head.appendChild(s);}
+                s.textContent='ytm-mobile-topbar-renderer,#masthead-container,.mobile-topbar-header,'+
+                    'ytm-app-promo-renderer,.ytm-mealbar-promo-renderer,ytm-mealbar-promo-renderer,'+
+                    '#below,ytm-watch-below-the-player-renderer,.slim-video-metadata-renderer,'+
+                    'ytm-slim-owner-renderer,.watch-below-the-player,#comments,ytm-comments-entry-point-header-renderer,'+
+                    'ytm-item-section-renderer,#related,.ytm-video-metadata-renderer,.miniplayer-toggle-button-container,'+
+                    'ytm-video-action-bar-renderer,.video-ads,.ytp-ce-element,.ytp-pause-overlay,.ytp-endscreen-content,'+
+                    'ytm-single-column-watch-next-results-renderer,ytm-watch-metadata,#player-container-id ~ *'+
+                    '{display:none !important;}'+
+                    'html,body{background:#000 !important;overflow:hidden !important;margin:0 !important;padding:0 !important;}'+
+                    '#player-container-id,#player,.html5-video-player,#movie_player{position:fixed !important;top:0 !important;left:0 !important;width:100% !important;height:100% !important;z-index:9999 !important;}';
+            })()""".trimIndent(),
+            null,
+        )
     }
 
     private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
@@ -1697,7 +1721,11 @@ class MainActivity : Activity() {
         previewLogo.visibility = View.GONE
         liveBadge.visibility = View.VISIBLE
         liveBadge.text = "TRAILER"
-        videoPreviewText.text = "Trailer no YouTube • ${entry.name}"
+        videoPreviewText.text = if (entry.kind == MediaKind.SERIES) {
+            "▶  Abrir série • ${seriesTitle(entry)}"
+        } else {
+            "▶  Assistir filme • ${entry.name}"
+        }
     }
 
     private fun startEmbeddedTrailerPreview(entry: CatalogEntry, url: String) {
