@@ -1169,7 +1169,7 @@ class MainActivity : Activity() {
     }
 
     private fun openFeaturedEntry(entry: CatalogEntry) {
-        switchSection(entry.kind)
+        switchSection(entry.kind, autoSelectFirst = false)
         handleEntryClick(entry)
     }
 
@@ -1210,7 +1210,7 @@ class MainActivity : Activity() {
         actionRow.removeAllViews()
     }
 
-    private fun switchSection(kind: MediaKind) {
+    private fun switchSection(kind: MediaKind, autoSelectFirst: Boolean = true) {
         parentalUnlocked = false
         radioMode = false
         voiceMode = false
@@ -1247,7 +1247,7 @@ class MainActivity : Activity() {
         renderNavigation()
         renderCategories()
         renderCatalog()
-        selectFirstVisible()
+        if (autoSelectFirst) selectFirstVisible()
         categoryList.post { focusFirstCategory() }
     }
 
@@ -3467,7 +3467,7 @@ class MainActivity : Activity() {
             if (pending > 0) return
             val match = found.firstNotNullOfOrNull { it }
             if (match != null) {
-                switchSection(match.kind)
+                switchSection(match.kind, autoSelectFirst = false)
                 handleEntryClick(match)
                 Toast.makeText(this, "Abrindo \"${match.name}\"", Toast.LENGTH_SHORT).show()
             } else {
