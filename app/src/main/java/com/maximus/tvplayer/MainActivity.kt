@@ -106,6 +106,16 @@ class MainActivity : Activity() {
     private lateinit var homeMoviesCard: FrameLayout
     private lateinit var homeSeriesCard: FrameLayout
     private lateinit var homeCartoonsCard: FrameLayout
+    private lateinit var homeMoviesCardImage: ImageView
+    private lateinit var homeMoviesCardTitle: TextView
+    private lateinit var homeSeriesCardImage: ImageView
+    private lateinit var homeSeriesCardTitle: TextView
+    private lateinit var homeCartoonsCardImage: ImageView
+    private lateinit var homeCartoonsCardTitle: TextView
+    private lateinit var homeCartoonsCardBadge: TextView
+    private var featuredMovie: CatalogEntry? = null
+    private var featuredSeries: CatalogEntry? = null
+    private var mostWatchedEntry: CatalogEntry? = null
     private var homeMode = false
     private var miniPlayer: ExoPlayer? = null
     private var miniPlayerView: PlayerView? = null
@@ -318,9 +328,16 @@ class MainActivity : Activity() {
         homeMoviesCard = findViewById(R.id.homeMoviesCard)
         homeSeriesCard = findViewById(R.id.homeSeriesCard)
         homeCartoonsCard = findViewById(R.id.homeCartoonsCard)
-        homeMoviesCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
-        homeSeriesCard.setOnClickListener { switchSection(MediaKind.SERIES) }
-        homeCartoonsCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
+        homeMoviesCardImage = findViewById(R.id.homeMoviesCardImage)
+        homeMoviesCardTitle = findViewById(R.id.homeMoviesCardTitle)
+        homeSeriesCardImage = findViewById(R.id.homeSeriesCardImage)
+        homeSeriesCardTitle = findViewById(R.id.homeSeriesCardTitle)
+        homeCartoonsCardImage = findViewById(R.id.homeCartoonsCardImage)
+        homeCartoonsCardTitle = findViewById(R.id.homeCartoonsCardTitle)
+        homeCartoonsCardBadge = findViewById(R.id.homeCartoonsCardBadge)
+        homeMoviesCard.setOnClickListener { featuredMovie?.let { openFeaturedEntry(it) } ?: switchSection(MediaKind.MOVIE) }
+        homeSeriesCard.setOnClickListener { featuredSeries?.let { openFeaturedEntry(it) } ?: switchSection(MediaKind.SERIES) }
+        homeCartoonsCard.setOnClickListener { mostWatchedEntry?.let { openFeaturedEntry(it) } ?: switchSection(MediaKind.LIVE) }
         listOf(
             findViewById<View>(R.id.homeNavHome),
             findViewById<View>(R.id.homeNavChannels),
@@ -1003,6 +1020,49 @@ class MainActivity : Activity() {
         homeHeroImage.setImageResource(R.drawable.excellence_home_hero)
         homeHeroTitle.text = "Aqui você encontra os melhores canais, filmes e séries"
         homeHeroDescription.text = "Conteúdos selecionados para você assistir com qualidade e praticidade."
+        renderHomeFeaturedCards()
+    }
+
+    private fun renderHomeFeaturedCards() {
+        if (!databaseBackedCatalog) return
+        val hidden = hiddenGroups()
+        repository.mostRecent(MediaKind.MOVIE, hidden) { entry ->
+            runOnUiThread {
+                if (!homeMode || entry == null) return@runOnUiThread
+                featuredMovie = entry
+                homeMoviesCardTitle.text = entry.name
+                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeMoviesCardImage, R.drawable.home_movies_card)
+            }
+        }
+        repository.mostRecent(MediaKind.SERIES, hidden) { entry ->
+            runOnUiThread {
+                if (!homeMode || entry == null) return@runOnUiThread
+                featuredSeries = entry
+                homeSeriesCardTitle.text = seriesTitle(entry)
+                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeSeriesCardImage, R.drawable.home_series_card)
+            }
+        }
+        val watchedKey = mostWatchedChannelKey()
+        if (watchedKey == null) {
+            homeCartoonsCardBadge.text = "DESENHOS EM DESTAQUE"
+            homeCartoonsCardTitle.text = "Desenhos em destaque"
+            mostWatchedEntry = null
+            return
+        }
+        repository.byKey(watchedKey) { entry ->
+            runOnUiThread {
+                if (!homeMode || entry == null) return@runOnUiThread
+                mostWatchedEntry = entry
+                homeCartoonsCardBadge.text = "CANAL MAIS ASSISTIDO"
+                homeCartoonsCardTitle.text = entry.name
+                imageLoader.load(entry.logoUrl, homeCartoonsCardImage, R.drawable.home_cartoons_card)
+            }
+        }
+    }
+
+    private fun openFeaturedEntry(entry: CatalogEntry) {
+        switchSection(entry.kind)
+        handleEntryClick(entry)
     }
 
     private fun clearPreviewForSection(kind: MediaKind) {
@@ -1451,6 +1511,7 @@ class MainActivity : Activity() {
         } else if (entry.kind == MediaKind.SERIES) {
             startTrailerPreview(entry)
         } else {
+            recordChannelWatch(entry)
             startMiniPlayer(entry)
         }
     }
@@ -3090,6 +3151,34 @@ class MainActivity : Activity() {
         getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putStringSet(PREF_FAVORITES, current).apply()
     }
 
+    // Contagem de "assistido" por canal, guardada separada do catalogo (que e
+    // apagado/reimportado periodicamente) para sobreviver a reimportacoes.
+    // Chave estavel: CatalogEntry.key (tvg-id + streamUrl), que nao muda entre
+    // reimportacoes do mesmo provedor.
+    private fun watchCounts(): MutableMap<String, Int> {
+        val raw = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_CHANNEL_WATCH_COUNTS, null).orEmpty()
+        if (raw.isBlank()) return mutableMapOf()
+        return runCatching {
+            val json = org.json.JSONObject(raw)
+            val map = mutableMapOf<String, Int>()
+            json.keys().forEach { key -> map[key] = json.optInt(key, 0) }
+            map
+        }.getOrDefault(mutableMapOf())
+    }
+
+    private fun recordChannelWatch(entry: CatalogEntry) {
+        if (entry.kind != MediaKind.LIVE || entry.key.isBlank()) return
+        val counts = watchCounts()
+        counts[entry.key] = (counts[entry.key] ?: 0) + 1
+        val json = org.json.JSONObject()
+        counts.forEach { (key, count) -> json.put(key, count) }
+        getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit()
+            .putString(PREF_CHANNEL_WATCH_COUNTS, json.toString())
+            .apply()
+    }
+
+    private fun mostWatchedChannelKey(): String? = watchCounts().maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key
+
     private fun editorialFor(entry: CatalogEntry): ChannelEditorial {
         val known = editorials.entries.firstOrNull { entry.name.lowercase().contains(it.key) }?.value
         return known ?: ChannelEditorial(
@@ -3198,6 +3287,7 @@ class MainActivity : Activity() {
     companion object {
         private const val PREF_FAVORITES = "favorite_catalog_keys"
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
+        private const val PREF_CHANNEL_WATCH_COUNTS = "channel_watch_counts"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"
         private const val PREF_MAC_ADDRESS = "mac_address"
         private const val PREF_SERVER_API_URL = "server_api_url"

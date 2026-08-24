@@ -601,7 +601,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="18dp"
-                android:text="ESCOLHA UMA CATEGORIA"
+                android:text="DESTAQUES PARA VOCÊ"
                 android:textColor="@color/white"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -623,6 +623,7 @@
                         android:clickable="true"
                         android:focusable="true">
                         <ImageView
+                            android:id="@+id/homeMoviesCardImage"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:scaleType="centerCrop"
@@ -631,15 +632,32 @@
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:background="#70050A14" />
-                        <TextView
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_gravity="bottom"
-                            android:padding="16dp"
-                            android:text="FILMES EM ALTA"
-                            android:textColor="@color/white"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:id="@+id/homeMoviesCardBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="FILME EM DESTAQUE"
+                                android:textColor="@color/cyan"
+                                android:textSize="9sp"
+                                android:textStyle="bold" />
+                            <TextView
+                                android:id="@+id/homeMoviesCardTitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:maxLines="2"
+                                android:ellipsize="end"
+                                android:text="FILMES EM ALTA"
+                                android:textColor="@color/white"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
                     </FrameLayout>
                     <FrameLayout
                         android:id="@+id/homeSeriesCard"
@@ -650,6 +668,7 @@
                         android:clickable="true"
                         android:focusable="true">
                         <ImageView
+                            android:id="@+id/homeSeriesCardImage"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:scaleType="centerCrop"
@@ -658,15 +677,32 @@
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:background="#70050A14" />
-                        <TextView
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_gravity="bottom"
-                            android:padding="16dp"
-                            android:text="SÉRIES EM ALTA"
-                            android:textColor="@color/white"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:id="@+id/homeSeriesCardBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="SÉRIE EM DESTAQUE"
+                                android:textColor="@color/cyan"
+                                android:textSize="9sp"
+                                android:textStyle="bold" />
+                            <TextView
+                                android:id="@+id/homeSeriesCardTitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:maxLines="2"
+                                android:ellipsize="end"
+                                android:text="SÉRIES EM ALTA"
+                                android:textColor="@color/white"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
                     </FrameLayout>
                     <FrameLayout
                         android:id="@+id/homeCartoonsCard"
@@ -676,6 +712,7 @@
                         android:clickable="true"
                         android:focusable="true">
                         <ImageView
+                            android:id="@+id/homeCartoonsCardImage"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:scaleType="centerCrop"
@@ -684,15 +721,32 @@
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:background="#70050A14" />
-                        <TextView
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_gravity="bottom"
-                            android:padding="16dp"
-                            android:text="DESENHOS EM DESTAQUE"
-                            android:textColor="@color/white"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:id="@+id/homeCartoonsCardBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="CANAL MAIS ASSISTIDO"
+                                android:textColor="@color/cyan"
+                                android:textSize="9sp"
+                                android:textStyle="bold" />
+                            <TextView
+                                android:id="@+id/homeCartoonsCardTitle"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:maxLines="2"
+                                android:ellipsize="end"
+                                android:text="DESENHOS EM DESTAQUE"
+                                android:textColor="@color/white"
+                                android:textSize="15sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
                     </FrameLayout>
                 </LinearLayout>
             </HorizontalScrollView>
