@@ -1227,12 +1227,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
         vodSection.visibility = View.GONE
-        if (kind == MediaKind.MOVIE) {
-            vodTitle.text = "CATEGORIAS DE FILMES (VOD)"
-            renderVodStrip()
-        } else {
-            vodCards.removeAllViews()
-        }
+        vodCards.removeAllViews()
         favoritesOnly = false
         currentKind = kind
         categoryRequestId++
@@ -1624,7 +1619,7 @@ class MainActivity : Activity() {
             return
         }
         if (sameEntry && previewMode == PreviewMode.TRAILER) {
-            showMovieFullScreen(entry)
+            openEntry(entry)
             return
         }
         if (sameEntry && previewMode == PreviewMode.CONTENT) {
@@ -1639,7 +1634,6 @@ class MainActivity : Activity() {
         } else {
             recordChannelWatch(entry)
             startMiniPlayer(entry)
-            expandMiniPlayer()
         }
     }
 
@@ -2185,7 +2179,7 @@ class MainActivity : Activity() {
         actions += primaryLabel to {
             val sameEntry = miniPlayerEntryKey == entry.key
             when {
-                sameEntry && previewMode == PreviewMode.TRAILER -> if (isSeriesRoot) showSeriesSeasonsDialog(entry) else showMovieFullScreen(entry)
+                sameEntry && previewMode == PreviewMode.TRAILER -> if (isSeriesRoot) showSeriesSeasonsDialog(entry) else openEntry(entry)
                 sameEntry && previewMode == PreviewMode.CONTENT -> expandMiniPlayer()
                 isSeriesRoot -> startTrailerPreview(entry)
                 entry.kind == MediaKind.MOVIE -> startTrailerPreview(entry)
@@ -2195,6 +2189,9 @@ class MainActivity : Activity() {
         }
         if (entry.kind == MediaKind.SERIES && !isSeriesRoot) {
             actions += "☷  TEMPORADAS" to { showSeriesSeasonsDialog(entry) }
+        }
+        if (entry.kind == MediaKind.MOVIE) {
+            actions += "ℹ  DETALHES" to { showMovieFullScreen(entry) }
         }
         actions += (if (isFavorite) "♥  FAVORITO" else "♡  FAVORITAR") to {
             toggleFavorite(entry)
@@ -2929,7 +2926,6 @@ class MainActivity : Activity() {
             if (selectedEntry == null) selectFirstVisible()
             if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
         }
-        renderVodStrip()
     }
 
     private fun startCatalogImportWatcher() {
@@ -2956,7 +2952,6 @@ class MainActivity : Activity() {
         renderCatalog()
         selectFirstVisible()
         loadConfiguredEpg(config.epgUrl.ifBlank { config.playlistUrls.firstOrNull().orEmpty() })
-        renderVodStrip()
         if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
     }
 
