@@ -1181,7 +1181,11 @@ class MainActivity : Activity() {
         pagedItems.clear()
         pageLoading = false
         pageFinished = false
-        catalogAdapter.submit(emptyList(), selectedEntry?.key)
+        // Não chama catalogAdapter.submit(emptyList()) aqui: isso deixava a
+        // lista visivelmente vazia por um instante até a primeira página do
+        // banco responder, e era a causa real do "piscar". A lista antiga
+        // fica na tela até loadNextPage() trazer os dados novos e trocar de
+        // uma vez só.
         loadNextPage()
     }
 
@@ -1210,6 +1214,7 @@ class MainActivity : Activity() {
                     if (offset == 0) {
                         selectedEntry = null
                         clearPreviewForSection(currentKind)
+                        catalogAdapter.submit(emptyList(), null)
                     }
                     return@runOnUiThread
                 }
