@@ -2081,6 +2081,7 @@ class MainActivity : Activity() {
         }
         if (selectedEntry?.key != entry.key) stopMiniPlayer()
         selectedEntry = entry
+        if (::catalogAdapter.isInitialized) catalogAdapter.setSelectedKey(entry.key)
         val editorial = editorialFor(entry)
         val epgPrograms = epgProgramsFor(entry)
         val epgProgram = currentEpgProgram(epgPrograms)

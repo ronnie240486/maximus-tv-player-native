@@ -28,6 +28,19 @@ class CatalogAdapter(
 
     fun positionOf(key: String?): Int = if (key == null) -1 else items.indexOfFirst { it.key == key }
 
+    // Atualiza qual item mostra a borda de selecionado sem recarregar a
+    // lista inteira (isso é o que fazia a borda quase nunca aparecer --
+    // antes só atualizava em submit(), que roda raramente por design, pra
+    // não bagunçar a posição de rolagem).
+    fun setSelectedKey(key: String?) {
+        if (key == selectedKey) return
+        val oldPosition = positionOf(selectedKey)
+        selectedKey = key
+        if (oldPosition >= 0) notifyItemChanged(oldPosition)
+        val newPosition = positionOf(key)
+        if (newPosition >= 0) notifyItemChanged(newPosition)
+    }
+
     fun append(items: List<CatalogEntry>) {
         if (items.isEmpty()) return
         val start = this.items.size
@@ -95,7 +108,7 @@ class CatalogAdapter(
             val isSelected = item.key == selectedKey
             holder.row.background = layered(
                 fill = if (focused) 0x333FE7EF else 0x00111629,
-                strokeColor = if (isSelected) 0xFF4CE8F0 else 0x00000000,
+                strokeColor = if (isSelected) 0xFFFFFFFF else 0x00000000,
                 strokeWidthPx = if (isSelected) 3 else 0,
             )
         }
