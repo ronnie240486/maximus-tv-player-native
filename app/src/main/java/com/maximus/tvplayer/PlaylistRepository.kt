@@ -22,6 +22,11 @@ data class CatalogMetadata(
     val trailer: String = "",
 )
 
+data class EpisodeDetail(
+    val image: String = "",
+    val plot: String = "",
+)
+
 class PlaylistRepository(private val context: Context) {
 
     private data class XtreamSource(val baseUrl: String, val username: String, val password: String)
@@ -29,6 +34,7 @@ class PlaylistRepository(private val context: Context) {
 
     private var externalMetadataByKey: Map<String, CatalogMetadata> = emptyMap()
     private var xtreamSource: XtreamSource? = null
+    private val episodeDetailsCache = mutableMapOf<String, Map<String, EpisodeDetail>>()
     // Cache do mapa nome->id (get_series / get_vod_streams) para não baixar e
     // varrer a lista inteira do provedor de novo a cada série/filme aberto --
     // isso podia ser bem lento/travar em catálogos grandes (dezenas de
@@ -258,6 +264,45 @@ class PlaylistRepository(private val context: Context) {
     }
 
     private fun CatalogMetadata.hasAnyData(): Boolean = synopsis.isNotBlank() || year.isNotBlank() || backdrop.isNotBlank() || trailer.isNotBlank()
+
+    // Busca imagem + sinopse de CADA episódio de uma série, usando o mesmo
+    // get_series_info do Xtream (que já é chamado para a sinopse geral da
+    // série, mas até aqui o campo "episodes" da resposta era ignorado).
+    // Resultado fica em cache em memória por série (temporada:episódio -> detalhe).
+    fun fetchSeriesEpisodeDetails(entry: CatalogEntry, callback: (Map<String, EpisodeDetail>) -> Unit) {
+        val cacheKey = entry.seriesGroup.ifBlank { entry.name }
+        episodeDetailsCache[cacheKey]?.let { callback(it); return }
+        executor.execute {
+            val result = runCatching { fetchEpisodeDetailsInternal(entry) }.getOrDefault(emptyMap())
+            if (result.isNotEmpty()) episodeDetailsCache[cacheKey] = result
+            callback(result)
+        }
+    }
+
+    private fun fetchEpisodeDetailsInternal(entry: CatalogEntry): Map<String, EpisodeDetail> {
+        val source = xtreamSource ?: parseXtreamSource(entry.streamUrl) ?: return emptyMap()
+        val directId = entry.tvgId.filter(Char::isDigit).ifBlank { extractProviderId(entry.streamUrl) }
+        val root = directId.takeIf { it.isNotBlank() }
+            ?.let { requestJson(xtreamEndpoint(source, "get_series_info", "series_id", it)) }
+            ?.takeIf { it.optJSONObject("episodes") != null }
+            ?: resolveProviderId(source, entry).takeIf { it.isNotBlank() && it != directId }
+                ?.let { requestJson(xtreamEndpoint(source, "get_series_info", "series_id", it)) }
+            ?: return emptyMap()
+        val episodesObj = root.optJSONObject("episodes") ?: return emptyMap()
+        val result = mutableMapOf<String, EpisodeDetail>()
+        episodesObj.keys().forEach { seasonKey ->
+            val array = episodesObj.optJSONArray(seasonKey) ?: return@forEach
+            for (i in 0 until array.length()) {
+                val ep = array.optJSONObject(i) ?: continue
+                val epNum = ep.optString("episode_num").ifBlank { (i + 1).toString() }
+                val info = ep.optJSONObject("info")
+                val image = info?.let { firstJsonText(it, "movie_image", "cover_big", "cover") }.orEmpty()
+                val plot = info?.let { firstJsonText(it, "plot", "description", "overview") }.orEmpty()
+                if (image.isNotBlank() || plot.isNotBlank()) result["$seasonKey:$epNum"] = EpisodeDetail(image, plot)
+            }
+        }
+        return result
+    }
 
     private fun extractProviderId(streamUrl: String): String = runCatching {
         Uri.parse(streamUrl).pathSegments.asReversed().firstOrNull { segment -> segment.substringBeforeLast('.').all(Char::isDigit) }.orEmpty()

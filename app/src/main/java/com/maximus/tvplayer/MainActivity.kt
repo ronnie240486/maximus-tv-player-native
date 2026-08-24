@@ -2154,66 +2154,267 @@ class MainActivity : Activity() {
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
         val showTitle = seriesTitle(entry)
-        val (dialog, list) = createCatalogDialog(
-            title = showTitle,
-            subtitle = "TEMPORADAS DISPONÍVEIS  •  selecione uma temporada para ver os episódios",
-            onBack = null,
-        )
+
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val scroll = ScrollView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            isFillViewport = true
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+
+        // Cabeçalho: imagem de fundo + título + sinopse da série.
+        val header = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
+        }
+        val backdrop = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            setImageResource(fallbackHero(entry))
+        }
+        val backdropShade = View(this).apply {
+            layoutParams = FrameLayout.LayoutParams(-1, -1)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x00000000, 0xE6070B15.toInt()))
+        }
+        val headerText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(28), 0, dp(28), dp(20)) }
+        }
+        val titleView = TextView(this).apply {
+            text = showTitle
+            setTextColor(Color.WHITE)
+            textSize = 26f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        val tagsView = TextView(this).apply {
+            setTextColor(Color.rgb(143, 155, 184))
+            textSize = 12f
+            setPadding(0, dp(4), 0, dp(10))
+        }
+        val synopsisView = TextView(this).apply {
+            text = "Buscando sinopse..."
+            setTextColor(Color.rgb(200, 208, 224))
+            textSize = 13f
+            maxLines = 4
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        headerText.addView(titleView)
+        headerText.addView(tagsView)
+        headerText.addView(synopsisView)
+        val backButton = TextView(this).apply {
+            text = "‹  VOLTAR"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            isFocusable = true
+            isClickable = true
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            background = rounded(0xCC101827, 10f)
+            layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(dp(20), dp(18), 0, 0) }
+        }
+        header.addView(backdrop)
+        header.addView(backdropShade)
+        header.addView(headerText)
+        header.addView(backButton)
+
+        val seasonRow = HorizontalScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(6) }
+            isHorizontalScrollBarEnabled = false
+        }
+        val seasonList = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+        }
+        seasonRow.addView(seasonList)
+
+        val episodesHeading = TextView(this).apply {
+            text = "EPISÓDIOS"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(dp(20), dp(14), dp(20), dp(6))
+        }
+        val episodeList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), dp(24))
+        }
+
+        content.addView(header)
+        content.addView(seasonRow)
+        content.addView(episodesHeading)
+        content.addView(episodeList)
+        scroll.addView(content)
+        root.addView(scroll)
+
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply { setContentView(root) }
         seriesSeasonsDialog = dialog
         dialog.setOnDismissListener { if (seriesSeasonsDialog === dialog) seriesSeasonsDialog = null }
+        backButton.setOnClickListener { dialog.dismiss() }
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) { dialog.dismiss(); true } else false
+        }
         dialog.show()
-        val render: (List<String>) -> Unit = { seasons ->
-            list.removeAllViews()
-            if (seasons.isEmpty()) {
-                list.addView(dialogMessage("Nenhuma temporada identificada para esta série na lista do painel."))
-            } else {
-                seasons.forEach { season ->
-                    list.addView(dialogButton("TEMPORADA ${season.padStart(2, '0')}") {
-                        dialog.dismiss()
-                        showSeriesEpisodesDialog(entry, season)
-                    })
-                }
-            }
-        }
-        if (databaseBackedCatalog) {
-            repository.querySeriesSeasons(showTitle, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { seasons -> runOnUiThread { render(seasons) } }
-        } else {
-            render(currentItems().filter { it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle }.map { it.season.ifBlank { "1" } }.distinct().sortedBy { it.toIntOrNull() ?: 1 })
-        }
-    }
+        backButton.post { backButton.requestFocus() }
 
-    private fun showSeriesEpisodesDialog(entry: CatalogEntry, season: String) {
-        seriesEpisodesDialog?.dismiss()
-        val showTitle = seriesTitle(entry)
-        val (dialog, list) = createCatalogDialog(
-            title = showTitle,
-            subtitle = "TEMPORADA ${season.padStart(2, '0')}  •  selecione um episódio para assistir em tela cheia",
-            onBack = { showSeriesSeasonsDialog(entry) },
-        )
-        seriesEpisodesDialog = dialog
-        dialog.setOnDismissListener { if (seriesEpisodesDialog === dialog) seriesEpisodesDialog = null }
-        dialog.show()
-        val render: (List<CatalogEntry>) -> Unit = { episodes ->
-            list.removeAllViews()
+        var episodeDetails: Map<String, EpisodeDetail> = emptyMap()
+        var currentSeason: String? = null
+
+        fun episodeDetailFor(episode: CatalogEntry): EpisodeDetail? {
+            val s = episode.season.ifBlank { "1" }.toIntOrNull()?.toString() ?: episode.season.ifBlank { "1" }
+            val e = episode.episode.toIntOrNull()?.toString() ?: episode.episode
+            return episodeDetails["$s:$e"]
+        }
+
+        fun renderEpisodes(season: String, episodes: List<CatalogEntry>) {
+            episodeList.removeAllViews()
             if (episodes.isEmpty()) {
-                list.addView(dialogMessage("Nenhum episódio encontrado nesta temporada."))
+                episodeList.addView(dialogMessage("Nenhum episódio encontrado nesta temporada."))
+                return
+            }
+            episodes.forEach { episode ->
+                val detail = episodeDetailFor(episode)
+                val code = episode.episode.takeIf { it.isNotBlank() }?.let { "E${it.padStart(2, '0')}" } ?: "EP"
+                val episodeTitle = episode.name.removePrefix("$showTitle ").trim().ifBlank { episode.name }
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    isFocusable = true
+                    isClickable = true
+                    setPadding(dp(10), dp(10), dp(14), dp(10))
+                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(4), 0, dp(4)) }
+                    background = rounded(0x14FFFFFF, 12f)
+                    setOnFocusChangeListener { view, hasFocus -> view.background = rounded(if (hasFocus) 0x334CE8F0 else 0x14FFFFFF, 12f) }
+                    setOnClickListener { dialog.dismiss(); openEntry(episode) }
+                }
+                val thumb = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    layoutParams = LinearLayout.LayoutParams(dp(160), dp(90)).apply { marginEnd = dp(14) }
+                    background = rounded(0xFF10192B.toInt(), 8f)
+                    clipToOutline = true
+                }
+                imageLoader.load(detail?.image.orEmpty().ifBlank { episode.logoUrl }, thumb, fallbackLogo(episode))
+                val textCol = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                }
+                val epTitleView = TextView(this).apply {
+                    text = "$code  •  $episodeTitle"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                val epSynopsisView = TextView(this).apply {
+                    text = displaySynopsis(detail?.plot.orEmpty()).ifBlank { "Sinopse não informada." }
+                    setTextColor(Color.rgb(160, 170, 192))
+                    textSize = 11.5f
+                    maxLines = 3
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(4), 0, 0)
+                }
+                textCol.addView(epTitleView)
+                textCol.addView(epSynopsisView)
+                card.addView(thumb)
+                card.addView(textCol)
+                episodeList.addView(card)
+            }
+        }
+
+        fun loadSeason(entryForSeason: CatalogEntry, season: String) {
+            currentSeason = season
+            episodeList.removeAllViews()
+            episodeList.addView(dialogMessage("Carregando episódios..."))
+            if (databaseBackedCatalog) {
+                repository.querySeriesEpisodes(showTitle, season, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { episodes ->
+                    runOnUiThread { if (currentSeason == season) renderEpisodes(season, episodes) }
+                }
             } else {
-                episodes.forEach { episode ->
-                    val code = episode.episode.takeIf { it.isNotBlank() }?.let { "E${it.padStart(2, '0')}" } ?: "EP"
-                    val episodeTitle = episode.name.removePrefix("${showTitle} ").trim().ifBlank { episode.name }
-                    list.addView(dialogButton("$code  •  $episodeTitle") {
-                        dialog.dismiss()
-                        openEntry(episode)
-                    })
+                val episodes = currentItems().filter {
+                    it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle && (it.season.ifBlank { "1" } == season)
+                }.sortedWith(compareBy({ it.episode.toIntOrNull() ?: Int.MAX_VALUE }, { it.name.lowercase() }))
+                renderEpisodes(season, episodes)
+            }
+        }
+
+        fun renderSeasons(seasons: List<String>) {
+            seasonList.removeAllViews()
+            if (seasons.isEmpty()) {
+                episodeList.removeAllViews()
+                episodeList.addView(dialogMessage("Nenhuma temporada identificada para esta série na lista do painel."))
+                return
+            }
+            seasons.forEachIndexed { index, season ->
+                val pill = TextView(this).apply {
+                    text = "TEMPORADA ${season.padStart(2, '0')}"
+                    isFocusable = true
+                    isClickable = true
+                    textSize = 12f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(16), dp(9), dp(16), dp(9))
+                    layoutParams = LinearLayout.LayoutParams(-2, -1).apply { marginEnd = dp(8) }
+                    setOnClickListener {
+                        for (i in 0 until seasonList.childCount) {
+                            val v = seasonList.getChildAt(i)
+                            val sel = i == seasons.indexOf(season)
+                            v.background = rounded(if (sel) 0x334CE8F0 else 0x14FFFFFF, 18f)
+                            (v as? TextView)?.setTextColor(if (sel) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                        }
+                        loadSeason(entry, season)
+                    }
+                }
+                val selected = index == 0
+                pill.setTextColor(if (selected) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+                pill.background = rounded(if (selected) 0x334CE8F0 else 0x14FFFFFF, 18f)
+                seasonList.addView(pill)
+            }
+            loadSeason(entry, seasons.first())
+        }
+
+        if (databaseBackedCatalog) {
+            repository.querySeriesSeasons(showTitle, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { seasons -> runOnUiThread { renderSeasons(seasons) } }
+        } else {
+            renderSeasons(currentItems().filter { it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle }.map { it.season.ifBlank { "1" } }.distinct().sortedBy { it.toIntOrNull() ?: 1 })
+        }
+
+        // Sinopse/backdrop da série (mesma fonte usada no painel de detalhes).
+        val cachedMeta = enrichedMetadata[entry.key]
+        val initialSynopsis = cachedMeta?.synopsis?.takeIf { it.isNotBlank() } ?: entry.synopsis
+        synopsisView.text = displaySynopsis(initialSynopsis).ifBlank { "Buscando sinopse..." }
+        tagsView.text = listOf(entry.groupTitle, cachedMeta?.year?.ifBlank { entry.year } ?: entry.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+        val backdropSource = cachedMeta?.backdrop?.ifBlank { entry.backdropUrl }?.ifBlank { entry.logoUrl } ?: entry.backdropUrl.ifBlank { entry.logoUrl }
+        imageLoader.load(backdropSource, backdrop, fallbackHero(entry))
+        repository.enrichMetadata(entry) { metadata ->
+            runOnUiThread {
+                if (seriesSeasonsDialog !== dialog) return@runOnUiThread
+                if (metadata != null) {
+                    if (metadata.synopsis.isNotBlank()) synopsisView.text = displaySynopsis(metadata.synopsis)
+                    if (metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, backdrop, fallbackHero(entry))
+                    if (metadata.year.isNotBlank()) tagsView.text = listOf(entry.groupTitle, metadata.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
+                } else if (entry.synopsis.isBlank()) {
+                    synopsisView.text = "Sinopse não informada na lista do painel."
                 }
             }
         }
-        if (databaseBackedCatalog) {
-            repository.querySeriesEpisodes(showTitle, season, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { episodes -> runOnUiThread { render(episodes) } }
-        } else {
-            render(currentItems().filter {
-                it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle && (it.season.ifBlank { "1" } == season)
-            }.sortedWith(compareBy({ it.episode.toIntOrNull() ?: Int.MAX_VALUE }, { it.name.lowercase() })))
+        repository.fetchSeriesEpisodeDetails(entry) { details ->
+            runOnUiThread {
+                if (seriesSeasonsDialog !== dialog || details.isEmpty()) return@runOnUiThread
+                episodeDetails = details
+                currentSeason?.let { season ->
+                    // Re-renderiza a temporada atual para já usar as imagens/sinopses recém-chegadas.
+                    if (databaseBackedCatalog) {
+                        repository.querySeriesEpisodes(showTitle, season, selectedCategory, hiddenGroups(), includeAdult = parentalUnlocked) { episodes ->
+                            runOnUiThread { if (currentSeason == season) renderEpisodes(season, episodes) }
+                        }
+                    } else {
+                        val episodes = currentItems().filter {
+                            it.kind == MediaKind.SERIES && seriesTitle(it) == showTitle && (it.season.ifBlank { "1" } == season)
+                        }.sortedWith(compareBy({ it.episode.toIntOrNull() ?: Int.MAX_VALUE }, { it.name.lowercase() }))
+                        renderEpisodes(season, episodes)
+                    }
+                }
+            }
         }
     }
 
