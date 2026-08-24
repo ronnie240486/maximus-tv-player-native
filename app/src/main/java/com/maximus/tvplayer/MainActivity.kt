@@ -2197,17 +2197,15 @@ class MainActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(-1, -2)
     }
 
-    private fun displaySynopsis(value: String): String = value
-        .replace("\\n", "\n")
-        .replace("<br>", "\n", ignoreCase = true)
-        .replace("<br/>", "\n", ignoreCase = true)
-        .replace("<br />", "\n", ignoreCase = true)
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace(Regex("\\s{2,}"), " ")
-        .trim()
+    private fun displaySynopsis(value: String): String {
+        if (value.isBlank()) return ""
+        val withBreaks = value.replace("\\n", "<br>")
+        val decoded = android.text.Html.fromHtml(withBreaks, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+        return decoded
+            .replace(Regex("[ \\t]{2,}"), " ")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+    }
 
     private fun seriesTitle(entry: CatalogEntry): String = entry.seriesGroup.ifBlank { entry.name }
 
