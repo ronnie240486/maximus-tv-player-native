@@ -26,6 +26,8 @@ class CatalogAdapter(
         notifyDataSetChanged()
     }
 
+    fun positionOf(key: String?): Int = if (key == null) -1 else items.indexOfFirst { it.key == key }
+
     fun append(items: List<CatalogEntry>) {
         if (items.isEmpty()) return
         val start = this.items.size
