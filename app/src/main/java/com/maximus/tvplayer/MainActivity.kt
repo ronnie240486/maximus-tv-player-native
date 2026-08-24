@@ -1140,7 +1140,7 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
         findViewById<View>(R.id.channelColumn).visibility = View.VISIBLE
         findViewById<View>(R.id.previewScroll).visibility = View.VISIBLE
-        vodSection.visibility = if (kind == MediaKind.MOVIE) View.VISIBLE else View.GONE
+        vodSection.visibility = View.GONE
         if (kind == MediaKind.MOVIE) {
             vodTitle.text = "CATEGORIAS DE FILMES (VOD)"
             renderVodStrip()
@@ -2590,9 +2590,10 @@ class MainActivity : Activity() {
 
     private fun renderVodStrip() {
         vodCards.removeAllViews()
-        if (!databaseBackedCatalog) return
+        if (!databaseBackedCatalog) { vodSection.visibility = View.GONE; return }
         repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortAlphabetically, 4, 0, includeAdult = parentalUnlocked) { movies ->
             runOnUiThread {
+                vodSection.visibility = if (movies.isEmpty()) View.GONE else View.VISIBLE
                 movies.forEach { movie ->
                     val card = TextView(this).apply {
                         text = movie.name
@@ -2703,16 +2704,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSettingsDialog() {
-        val prefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
-        val config = remoteConfig
-        val mac = prefs.getString(PREF_MAC_ADDRESS, "").orEmpty()
-        val status = config?.status?.ifBlank { "conectado" } ?: "aguardando painel"
-        val message = buildString {
-            append("MAC: ").append(mac.ifBlank { "não informado" })
-            append("\\nStatus: ").append(status)
-            append("\\n\\nCatálogo: ").append(catalog.totalCount).append(" itens em ").append(catalog.groupCount).append(" grupos.")
-            append("\\nControle parental: ").append(if (hasParentalPin()) "PIN configurado" else "não configurado")
-        }
+        val message = if (hasParentalPin()) "Controle parental: PIN configurado" else "Controle parental: não configurado"
         val options = listOf(
             "Controle parental (PIN)" to { showParentalControlDialog() },
             "Áudio e reprodução" to { showPlaybackSettingsDialog() },
