@@ -254,8 +254,9 @@ class PlaylistRepository(private val context: Context) {
         val resolvedId = resolveProviderId(source, entry)
         if (resolvedId.isBlank() || resolvedId == directId) {
             lastMetadataDebug = when {
-                directId.isBlank() -> "sem id direto e sem id resolvido pelo nome"
+                directId.isBlank() -> "sem id direto e sem id resolvido pelo nome ($lastResolveDebug)"
                 directJson == null -> "requisicao falhou (id direto $directId, timeout ou erro HTTP)"
+                resolvedId.isBlank() -> "id direto $directId sem dados uteis, e busca por nome falhou ($lastResolveDebug)"
                 else -> "resposta sem dados uteis (id direto $directId): ${directJson.toString().take(120)}"
             }
             return directMetadata
@@ -328,18 +329,22 @@ class PlaylistRepository(private val context: Context) {
         val lookup = idLookupCache.getOrPut(entry.kind) { fetchIdLookup(source, entry.kind) }
         val wanted = normalizeMetadataName(if (entry.kind == MediaKind.SERIES) entry.seriesGroup.ifBlank { entry.name } else entry.name)
         lookup[wanted]?.let { return it }
-        // Correspondência parcial só como último recurso (nomes com sufixos/prefixos leves).
-        return lookup.entries.firstOrNull { (name, _) -> name.contains(wanted) || wanted.contains(name) }?.value.orEmpty()
+        val partial = lookup.entries.firstOrNull { (name, _) -> name.contains(wanted) || wanted.contains(name) }?.value
+        if (partial != null) return partial
+        lastResolveDebug = if (lookup.isEmpty()) "lista de nomes do provedor veio vazia" else "lista tem ${lookup.size} nomes mas nenhum bateu com \"$wanted\""
+        return ""
     }
+
+    @Volatile var lastResolveDebug: String = ""
+        private set
 
     private fun fetchIdLookup(source: XtreamSource, kind: MediaKind): Map<String, String> {
         val action = if (kind == MediaKind.SERIES) "get_series" else "get_vod_streams"
-        val root = requestJson(xtreamEndpoint(source, action)) ?: return emptyMap()
-        val array = if (kind == MediaKind.SERIES) root.optJSONArray("series") else root.optJSONArray("vod_streams")
+        val array = requestJsonArray(xtreamEndpoint(source, action)) ?: return emptyMap()
         val idField = if (kind == MediaKind.SERIES) "series_id" else "stream_id"
         val map = LinkedHashMap<String, String>()
-        for (i in 0 until (array?.length() ?: 0)) {
-            val item = array?.optJSONObject(i) ?: continue
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
             val name = normalizeMetadataName(item.optString("name"))
             val id = item.optString(idField)
             if (name.isNotBlank() && id.isNotBlank() && name !in map) map[name] = id
@@ -362,7 +367,7 @@ class PlaylistRepository(private val context: Context) {
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .trim()
 
-    private fun requestJson(endpoint: String): JSONObject? = runCatching {
+    private fun requestBody(endpoint: String): String? = runCatching {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             connectTimeout = 6_000
             readTimeout = 8_000
@@ -372,8 +377,21 @@ class PlaylistRepository(private val context: Context) {
         val status = connection.responseCode
         val body = (if (status in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
         connection.disconnect()
-        if (status !in 200..299 || body.isBlank()) null else JSONObject(body)
+        if (status !in 200..299 || body.isBlank()) null else body
     }.getOrNull()
+
+    private fun requestJson(endpoint: String): JSONObject? = requestBody(endpoint)?.let { body -> runCatching { JSONObject(body) }.getOrNull() }
+
+    // Alguns endpoints do Xtream (get_series, get_vod_streams) respondem com
+    // um array JSON puro no topo ("[...]"), não um objeto -- se tentarmos
+    // JSONObject(body) nesses casos, falha silenciosamente e a busca por
+    // nome (fallback quando o id direto não bate) nunca encontra nada.
+    private fun requestJsonArray(endpoint: String): org.json.JSONArray? = requestBody(endpoint)?.let { body ->
+        runCatching { org.json.JSONArray(body) }.getOrNull()
+            ?: runCatching { JSONObject(body) }.getOrNull()?.let { obj ->
+                obj.keys().asSequence().firstNotNullOfOrNull { key -> obj.optJSONArray(key) }
+            }
+    }
 
     private fun firstJsonText(json: JSONObject, vararg keys: String): String {
         keys.forEach { key ->
