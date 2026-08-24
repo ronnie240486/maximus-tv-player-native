@@ -293,7 +293,7 @@ class MainActivity : Activity() {
         previewLogo = findViewById(R.id.previewLogo)
         heroImage = findViewById(R.id.heroImage)
         tvFrameOverlay = findViewById(R.id.tvFrameOverlay)
-        tvFrameOverlay.visibility = View.VISIBLE
+        tvFrameOverlay.visibility = View.GONE
         liveBadge = findViewById(R.id.liveBadge)
         detailEyebrow = findViewById(R.id.detailEyebrow)
         detailChannelName = findViewById(R.id.detailChannelName)
@@ -1568,9 +1568,9 @@ class MainActivity : Activity() {
     }
 
 
-    // Fração da área de "tela" dentro da imagem da moldura de TV antiga
-    // (calculada a partir do recorte original: a área xadrez/transparente
-    // onde o vídeo deve aparecer).
+    // Moldura de TV antiga desativada a pedido do usuário (ficava pequena e
+    // "flutuando"). Função mantida (sem uso) caso seja reativada no futuro;
+    // por enquanto o conteúdo sempre preenche o preview inteiro.
     private object TvFrameScreen {
         const val LEFT = 0.1477f
         const val TOP = 0.1678f
@@ -1578,24 +1578,14 @@ class MainActivity : Activity() {
         const val HEIGHT = 0.6085f
     }
 
-    // Encaixa a view de conteúdo (player/webview) exatamente no "buraco da
-    // tela" da moldura, considerando como a imagem foi de fato desenhada
-    // dentro do ImageView (fitCenter pode deixar barras vazias nas laterais
-    // ou em cima/embaixo, dependendo da proporção do container).
     private fun fitContentToTvFrame(content: View) {
-        tvFrameOverlay.post {
-            val drawable = tvFrameOverlay.drawable ?: return@post
-            val bounds = RectF(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
-            tvFrameOverlay.imageMatrix.mapRect(bounds)
-            if (bounds.width() <= 0f || bounds.height() <= 0f) return@post
-            val params = (content.layoutParams as? FrameLayout.LayoutParams) ?: FrameLayout.LayoutParams(-1, -1)
-            params.width = (bounds.width() * TvFrameScreen.WIDTH).toInt()
-            params.height = (bounds.height() * TvFrameScreen.HEIGHT).toInt()
-            params.gravity = Gravity.NO_GRAVITY
-            params.leftMargin = (bounds.left + bounds.width() * TvFrameScreen.LEFT).toInt()
-            params.topMargin = (bounds.top + bounds.height() * TvFrameScreen.TOP).toInt()
-            content.layoutParams = params
-        }
+        val params = (content.layoutParams as? FrameLayout.LayoutParams) ?: FrameLayout.LayoutParams(-1, -1)
+        params.width = -1
+        params.height = -1
+        params.gravity = Gravity.NO_GRAVITY
+        params.leftMargin = 0
+        params.topMargin = 0
+        content.layoutParams = params
     }
 
     private fun startMiniPlayer(entry: CatalogEntry, sourceUrl: String = entry.streamUrl, previewTitle: String = entry.name, mode: PreviewMode = PreviewMode.CONTENT) {
