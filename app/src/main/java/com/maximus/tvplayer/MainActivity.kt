@@ -2360,9 +2360,46 @@ class MainActivity : Activity() {
                 val detail = episodeDetailFor(episode)
                 val code = episode.episode.takeIf { it.isNotBlank() }?.let { "E${it.padStart(2, '0')}" } ?: "EP"
                 val episodeTitle = episode.name.removePrefix("$showTitle ").trim().ifBlank { episode.name }
-                val synopsisPreview = displaySynopsis(detail?.plot.orEmpty())
-                val label = if (synopsisPreview.isNotBlank()) "$code  •  $episodeTitle\n$synopsisPreview" else "$code  •  $episodeTitle"
-                episodeList.addView(dialogButton(label) { dialog.dismiss(); openEntry(episode) })
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    isFocusable = true
+                    isClickable = true
+                    setPadding(dp(10), dp(10), dp(14), dp(10))
+                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(4), 0, dp(4)) }
+                    background = rounded(0x14FFFFFF, 12f)
+                    setOnFocusChangeListener { view, hasFocus -> view.background = rounded(if (hasFocus) 0x334CE8F0 else 0x14FFFFFF, 12f) }
+                    setOnClickListener { dialog.dismiss(); openEntry(episode) }
+                }
+                val thumb = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    layoutParams = LinearLayout.LayoutParams(dp(160), dp(90)).apply { marginEnd = dp(14) }
+                    background = rounded(0xFF10192B.toInt(), 8f)
+                }
+                val textCol = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                }
+                val epTitleView = TextView(this).apply {
+                    text = "$code  •  $episodeTitle"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                val epSynopsisView = TextView(this).apply {
+                    text = displaySynopsis(detail?.plot.orEmpty()).ifBlank { "Sinopse não informada." }
+                    setTextColor(Color.rgb(160, 170, 192))
+                    textSize = 11.5f
+                    maxLines = 3
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(4), 0, 0)
+                }
+                textCol.addView(epTitleView)
+                textCol.addView(epSynopsisView)
+                card.addView(thumb)
+                card.addView(textCol)
+                episodeList.addView(card)
             }
         }
 
