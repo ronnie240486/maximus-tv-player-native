@@ -1026,20 +1026,20 @@ class MainActivity : Activity() {
     private fun renderHomeFeaturedCards() {
         if (!databaseBackedCatalog) return
         val hidden = hiddenGroups()
-        repository.mostRecent(MediaKind.MOVIE, hidden) { entry ->
-            runOnUiThread {
-                if (!homeMode || entry == null) return@runOnUiThread
-                featuredMovie = entry
-                homeMoviesCardTitle.text = entry.name
-                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeMoviesCardImage, R.drawable.home_movies_card)
+        val movieKeywords = listOf("lançamento", "lancamento", "animação", "animacao", "desenho")
+        val seriesKeywords = listOf("lançamento", "lancamento", "novidade")
+        repository.mostRecentInGroups(MediaKind.MOVIE, movieKeywords, hidden) { fromGroup ->
+            if (fromGroup != null) {
+                applyFeaturedMovie(fromGroup)
+            } else {
+                repository.mostRecent(MediaKind.MOVIE, hidden) { entry -> if (entry != null) applyFeaturedMovie(entry) }
             }
         }
-        repository.mostRecent(MediaKind.SERIES, hidden) { entry ->
-            runOnUiThread {
-                if (!homeMode || entry == null) return@runOnUiThread
-                featuredSeries = entry
-                homeSeriesCardTitle.text = seriesTitle(entry)
-                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeSeriesCardImage, R.drawable.home_series_card)
+        repository.mostRecentInGroups(MediaKind.SERIES, seriesKeywords, hidden) { fromGroup ->
+            if (fromGroup != null) {
+                applyFeaturedSeries(fromGroup)
+            } else {
+                repository.mostRecent(MediaKind.SERIES, hidden) { entry -> if (entry != null) applyFeaturedSeries(entry) }
             }
         }
         val watchedKey = mostWatchedChannelKey()
@@ -1057,6 +1057,24 @@ class MainActivity : Activity() {
                 homeCartoonsCardTitle.text = entry.name
                 imageLoader.load(entry.logoUrl, homeCartoonsCardImage, R.drawable.home_cartoons_card)
             }
+        }
+    }
+
+    private fun applyFeaturedMovie(entry: CatalogEntry) {
+        runOnUiThread {
+            if (!homeMode) return@runOnUiThread
+            featuredMovie = entry
+            homeMoviesCardTitle.text = entry.name
+            imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeMoviesCardImage, R.drawable.home_movies_card)
+        }
+    }
+
+    private fun applyFeaturedSeries(entry: CatalogEntry) {
+        runOnUiThread {
+            if (!homeMode) return@runOnUiThread
+            featuredSeries = entry
+            homeSeriesCardTitle.text = seriesTitle(entry)
+            imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeSeriesCardImage, R.drawable.home_series_card)
         }
     }
 
@@ -1637,7 +1655,11 @@ class MainActivity : Activity() {
 
     private fun youtubeVideoPageUrl(videoId: String): String {
         val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        return "https://www.youtube.com/watch?v=$safeId&autoplay=1&playsinline=1&mute=0&rel=0"
+        // Endpoint oficial de embed: vem só com o player, sem cabeçalho, canal,
+        // inscrever-se, comentários, etc -- mais confiável do que tentar
+        // esconder pedaços da página completa do YouTube via CSS, cuja
+        // estrutura muda com frequência.
+        return "https://www.youtube-nocookie.com/embed/$safeId?autoplay=1&playsinline=1&mute=0&rel=0&controls=1&modestbranding=1&iv_load_policy=3&fs=0"
     }
 
     private fun loadYoutubeVideoPage(webView: WebView, videoId: String) {
