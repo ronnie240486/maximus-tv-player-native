@@ -897,7 +897,7 @@ class MainActivity : Activity() {
                 clipChildren = false
                 clipToPadding = false
                 setPadding(0, 6, 0, 6)
-                layoutParams = LinearLayout.LayoutParams(-1, 220).apply { setMargins(6, 10, 6, 10) }
+                layoutParams = LinearLayout.LayoutParams(-1, 172).apply { setMargins(4, 8, 4, 8) }
                 setOnClickListener {
                     when (label) {
                         "INÍCIO" -> showHome()
@@ -913,33 +913,22 @@ class MainActivity : Activity() {
                 setOnFocusChangeListener { view, hasFocus ->
                     updateNavigationVisuals(if (hasFocus) view else navItems.findFocus())
                 }
-                setOnKeyListener { _, eventKeyCode, keyEvent ->
-                    if (keyEvent.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                    when (eventKeyCode) {
-                        KeyEvent.KEYCODE_DPAD_LEFT,
-                        KeyEvent.KEYCODE_DPAD_RIGHT,
-                        KeyEvent.KEYCODE_DPAD_UP,
-                        KeyEvent.KEYCODE_DPAD_DOWN,
-                        -> moveDpad(eventKeyCode)
-                        else -> false
-                    }
-                }
             }
             icon = ImageView(this).apply {
                 setImageResource(iconRes)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 alpha = if (isNavigationSelected(label)) 1f else 0.72f
                 background = null
-                layoutParams = LinearLayout.LayoutParams(140, 140).apply { setMargins(0, 0, 0, 8) }
+                layoutParams = LinearLayout.LayoutParams(105, 105).apply { setMargins(0, 0, 0, 6) }
                 setPadding(0, 0, 0, 0)
             }
             caption = TextView(this).apply {
                 text = captionText
                 gravity = Gravity.CENTER
                 includeFontPadding = false
-                textSize = 12f
+                textSize = 10.5f
                 setTextColor(if (isNavigationSelected(label)) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                layoutParams = LinearLayout.LayoutParams(-1, 38)
+                layoutParams = LinearLayout.LayoutParams(-1, 32)
             }
             row.addView(icon)
             row.addView(caption)
@@ -1169,17 +1158,6 @@ class MainActivity : Activity() {
                         if (hasFocus || category == selectedCategory) 0x334CE8F0 else 0x00111629,
                         18f,
                     )
-                }
-                setOnKeyListener { _, eventKeyCode, keyEvent ->
-                    if (keyEvent.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                    when (eventKeyCode) {
-                        KeyEvent.KEYCODE_DPAD_LEFT,
-                        KeyEvent.KEYCODE_DPAD_RIGHT,
-                        KeyEvent.KEYCODE_DPAD_UP,
-                        KeyEvent.KEYCODE_DPAD_DOWN,
-                        -> moveDpad(eventKeyCode)
-                        else -> false
-                    }
                 }
             }
             item.setTextColor(if (category == selectedCategory) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
@@ -2263,11 +2241,20 @@ class MainActivity : Activity() {
         // applyCatalogSnapshot só usa alguns campos (ex.: epgUrl) que aqui não
         // temos mesmo -- o catálogo em si já está no SQLite, importado pela
         // ActivationActivity antes de abrir esta tela.
+        // Deriva a URL do EPG a partir das credenciais manuais (padrão Xtream:
+        // mesma base do get.php, endpoint xmltv.php). Sem isso, epgUrl ficava
+        // sempre em branco e a programação ao vivo nunca aparecia no modo DNS.
+        val manualDns = prefs.getString(ActivationActivity.PREF_MANUAL_DNS, "").orEmpty()
+        val manualUser = prefs.getString(ActivationActivity.PREF_MANUAL_USER, "").orEmpty()
+        val manualPassword = prefs.getString(ActivationActivity.PREF_MANUAL_PASSWORD, "").orEmpty()
+        val manualEpgUrl = if (manualDns.isNotBlank() && manualUser.isNotBlank() && manualPassword.isNotBlank()) {
+            "$manualDns/xmltv.php?username=${java.net.URLEncoder.encode(manualUser, "UTF-8")}&password=${java.net.URLEncoder.encode(manualPassword, "UTF-8")}"
+        } else ""
         val emptyConfig = RemoteAppConfig(
             registered = true, allowed = true, mac = "", appId = "maximus", appName = "Excellence",
             status = "", expiration = "", logoUrl = "", bannerUrl = "", backgroundUrl = "",
             messageTitle = "", messageText = "", messageImageUrl = "", iconLiveTv = "", iconMovies = "",
-            iconSeries = "", serverApiUrl = "", dnsUrl = "", testApiUrl = "", epgUrl = "",
+            iconSeries = "", serverApiUrl = "", dnsUrl = "", testApiUrl = "", epgUrl = manualEpgUrl,
             playlistUrls = emptyList(), apkDownloadUrl = "", apkVersion = "",
         )
         repository.loadCached { cached ->
@@ -2356,10 +2343,18 @@ class MainActivity : Activity() {
             "Olá, usuário  •  ${snapshot.totalCount} itens"
         }
         if (!wasHome && !radioMode) {
-            renderCategories()
-            renderCatalog()
-            if (selectedEntry == null) selectFirstVisible()
-            if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
+            // Não reconstrói a lista/categorias do zero enquanto o usuário está
+            // navegando ativamente dentro dela -- isso é o que causava o "piscar"
+            // e o foco voltando sozinho para a primeira categoria a cada 2s
+            // durante a importação em segundo plano. Itens novos continuam
+            // aparecendo normalmente via paginação ao rolar a lista.
+            val browsingCatalog = isWithin(currentFocus, categoryList) || isWithin(currentFocus, channelList)
+            if (!browsingCatalog) {
+                renderCategories()
+                renderCatalog()
+                if (selectedEntry == null) selectFirstVisible()
+                if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
+            }
         }
         renderVodStrip()
     }
