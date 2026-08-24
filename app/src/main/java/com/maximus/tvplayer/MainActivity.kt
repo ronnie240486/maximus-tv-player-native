@@ -26,6 +26,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
@@ -74,6 +75,9 @@ class MainActivity : Activity() {
     private lateinit var searchHint: TextView
     private lateinit var liveHeader: TextView
     private lateinit var greeting: TextView
+    private lateinit var importProgressBanner: LinearLayout
+    private lateinit var importProgressText: TextView
+    private lateinit var importProgressBar: ProgressBar
     private lateinit var channelHeading: TextView
     private lateinit var videoPreviewText: TextView
     private lateinit var previewLogo: ImageView
@@ -102,6 +106,16 @@ class MainActivity : Activity() {
     private lateinit var homeMoviesCard: FrameLayout
     private lateinit var homeSeriesCard: FrameLayout
     private lateinit var homeCartoonsCard: FrameLayout
+    private lateinit var homeMoviesCardImage: ImageView
+    private lateinit var homeMoviesCardTitle: TextView
+    private lateinit var homeSeriesCardImage: ImageView
+    private lateinit var homeSeriesCardTitle: TextView
+    private lateinit var homeCartoonsCardImage: ImageView
+    private lateinit var homeCartoonsCardTitle: TextView
+    private lateinit var homeCartoonsCardBadge: TextView
+    private var featuredMovie: CatalogEntry? = null
+    private var featuredSeries: CatalogEntry? = null
+    private var mostWatchedEntry: CatalogEntry? = null
     private var homeMode = false
     private var miniPlayer: ExoPlayer? = null
     private var miniPlayerView: PlayerView? = null
@@ -154,8 +168,10 @@ class MainActivity : Activity() {
             if (!catalogImportInProgress) return
             repository.loadCached { snapshot ->
                 runOnUiThread {
-                    val stillLoading = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
-                        .getBoolean(ActivationActivity.PREF_IMPORT_IN_PROGRESS, true)
+                    val importPrefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+                    val stillLoading = importPrefs.getBoolean(ActivationActivity.PREF_IMPORT_IN_PROGRESS, true)
+                    val percent = importPrefs.getInt(ActivationActivity.PREF_IMPORT_PROGRESS_PERCENT, 0)
+                    updateImportProgressBanner(stillLoading, percent)
                     if (snapshot != null && snapshot.totalCount > 0 && snapshot.totalCount != catalog.totalCount) {
                         applyPartialCatalogSnapshot(snapshot, stillLoading)
                     }
@@ -163,6 +179,20 @@ class MainActivity : Activity() {
                     if (stillLoading) mainHandler.postDelayed(this, 2_000)
                 }
             }
+        }
+    }
+
+    private fun updateImportProgressBanner(stillLoading: Boolean, percent: Int) {
+        if (!stillLoading) {
+            if (importProgressBanner.visibility != View.GONE) importProgressBanner.visibility = View.GONE
+            return
+        }
+        importProgressBanner.visibility = View.VISIBLE
+        importProgressBar.progress = percent.coerceIn(0, 100)
+        importProgressText.text = when {
+            percent <= 0 -> "⏳ Preparando seu conteúdo..."
+            percent >= 95 -> "⏳ $percent%  •  Quase lá! Finalizando o catálogo..."
+            else -> "⏳ $percent%  •  Seu conteúdo está sendo carregado. Já já você terá o melhor conteúdo!"
         }
     }
 
@@ -253,6 +283,9 @@ class MainActivity : Activity() {
         searchHint = findViewById(R.id.searchHint)
         liveHeader = findViewById(R.id.liveHeader)
         greeting = findViewById(R.id.greeting)
+        importProgressBanner = findViewById(R.id.importProgressBanner)
+        importProgressText = findViewById(R.id.importProgressText)
+        importProgressBar = findViewById(R.id.importProgressBar)
         channelHeading = findViewById(R.id.channelHeading)
         videoPreviewText = findViewById(R.id.videoPreviewText)
         previewLogo = findViewById(R.id.previewLogo)
@@ -295,9 +328,16 @@ class MainActivity : Activity() {
         homeMoviesCard = findViewById(R.id.homeMoviesCard)
         homeSeriesCard = findViewById(R.id.homeSeriesCard)
         homeCartoonsCard = findViewById(R.id.homeCartoonsCard)
-        homeMoviesCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
-        homeSeriesCard.setOnClickListener { switchSection(MediaKind.SERIES) }
-        homeCartoonsCard.setOnClickListener { switchSection(MediaKind.MOVIE) }
+        homeMoviesCardImage = findViewById(R.id.homeMoviesCardImage)
+        homeMoviesCardTitle = findViewById(R.id.homeMoviesCardTitle)
+        homeSeriesCardImage = findViewById(R.id.homeSeriesCardImage)
+        homeSeriesCardTitle = findViewById(R.id.homeSeriesCardTitle)
+        homeCartoonsCardImage = findViewById(R.id.homeCartoonsCardImage)
+        homeCartoonsCardTitle = findViewById(R.id.homeCartoonsCardTitle)
+        homeCartoonsCardBadge = findViewById(R.id.homeCartoonsCardBadge)
+        homeMoviesCard.setOnClickListener { featuredMovie?.let { openFeaturedEntry(it) } ?: switchSection(MediaKind.MOVIE) }
+        homeSeriesCard.setOnClickListener { featuredSeries?.let { openFeaturedEntry(it) } ?: switchSection(MediaKind.SERIES) }
+        homeCartoonsCard.setOnClickListener { mostWatchedEntry?.let { openFeaturedEntry(it) } ?: switchSection(MediaKind.LIVE) }
         listOf(
             findViewById<View>(R.id.homeNavHome),
             findViewById<View>(R.id.homeNavChannels),
@@ -980,6 +1020,49 @@ class MainActivity : Activity() {
         homeHeroImage.setImageResource(R.drawable.excellence_home_hero)
         homeHeroTitle.text = "Aqui você encontra os melhores canais, filmes e séries"
         homeHeroDescription.text = "Conteúdos selecionados para você assistir com qualidade e praticidade."
+        renderHomeFeaturedCards()
+    }
+
+    private fun renderHomeFeaturedCards() {
+        if (!databaseBackedCatalog) return
+        val hidden = hiddenGroups()
+        repository.mostRecent(MediaKind.MOVIE, hidden) { entry ->
+            runOnUiThread {
+                if (!homeMode || entry == null) return@runOnUiThread
+                featuredMovie = entry
+                homeMoviesCardTitle.text = entry.name
+                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeMoviesCardImage, R.drawable.home_movies_card)
+            }
+        }
+        repository.mostRecent(MediaKind.SERIES, hidden) { entry ->
+            runOnUiThread {
+                if (!homeMode || entry == null) return@runOnUiThread
+                featuredSeries = entry
+                homeSeriesCardTitle.text = seriesTitle(entry)
+                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeSeriesCardImage, R.drawable.home_series_card)
+            }
+        }
+        val watchedKey = mostWatchedChannelKey()
+        if (watchedKey == null) {
+            homeCartoonsCardBadge.text = "DESENHOS EM DESTAQUE"
+            homeCartoonsCardTitle.text = "Desenhos em destaque"
+            mostWatchedEntry = null
+            return
+        }
+        repository.byKey(watchedKey) { entry ->
+            runOnUiThread {
+                if (!homeMode || entry == null) return@runOnUiThread
+                mostWatchedEntry = entry
+                homeCartoonsCardBadge.text = "CANAL MAIS ASSISTIDO"
+                homeCartoonsCardTitle.text = entry.name
+                imageLoader.load(entry.logoUrl, homeCartoonsCardImage, R.drawable.home_cartoons_card)
+            }
+        }
+    }
+
+    private fun openFeaturedEntry(entry: CatalogEntry) {
+        switchSection(entry.kind)
+        handleEntryClick(entry)
     }
 
     private fun clearPreviewForSection(kind: MediaKind) {
@@ -1140,7 +1223,7 @@ class MainActivity : Activity() {
                 id = View.generateViewId()
                 text = category
                 gravity = Gravity.CENTER
-                textSize = 10f
+                textSize = 13f
                 isFocusable = true
                 isClickable = true
                 setPadding(12, 7, 12, 7)
@@ -1428,6 +1511,7 @@ class MainActivity : Activity() {
         } else if (entry.kind == MediaKind.SERIES) {
             startTrailerPreview(entry)
         } else {
+            recordChannelWatch(entry)
             startMiniPlayer(entry)
         }
     }
@@ -1598,6 +1682,30 @@ class MainActivity : Activity() {
             })()""".trimIndent(),
             null,
         )
+        hideYoutubeChrome(webView)
+    }
+
+    // Esconde tudo da pagina do YouTube que nao seja o video em si (cabecalho,
+    // nome do canal, inscrever-se, curtidas, banner "Abrir app", comentarios,
+    // sugestoes) e faz o player ocupar o espaco inteiro.
+    private fun hideYoutubeChrome(webView: WebView) {
+        webView.evaluateJavascript(
+            """(function(){
+                var s=document.getElementById('excellence-hide-chrome');
+                if(!s){s=document.createElement('style');s.id='excellence-hide-chrome';document.head.appendChild(s);}
+                s.textContent='ytm-mobile-topbar-renderer,#masthead-container,.mobile-topbar-header,'+
+                    'ytm-app-promo-renderer,.ytm-mealbar-promo-renderer,ytm-mealbar-promo-renderer,'+
+                    '#below,ytm-watch-below-the-player-renderer,.slim-video-metadata-renderer,'+
+                    'ytm-slim-owner-renderer,.watch-below-the-player,#comments,ytm-comments-entry-point-header-renderer,'+
+                    'ytm-item-section-renderer,#related,.ytm-video-metadata-renderer,.miniplayer-toggle-button-container,'+
+                    'ytm-video-action-bar-renderer,.video-ads,.ytp-ce-element,.ytp-pause-overlay,.ytp-endscreen-content,'+
+                    'ytm-single-column-watch-next-results-renderer,ytm-watch-metadata,#player-container-id ~ *'+
+                    '{display:none !important;}'+
+                    'html,body{background:#000 !important;overflow:hidden !important;margin:0 !important;padding:0 !important;}'+
+                    '#player-container-id,#player,.html5-video-player,#movie_player{position:fixed !important;top:0 !important;left:0 !important;width:100% !important;height:100% !important;z-index:9999 !important;}';
+            })()""".trimIndent(),
+            null,
+        )
     }
 
     private fun registerTrailerView(entry: CatalogEntry, webView: WebView) {
@@ -1613,7 +1721,11 @@ class MainActivity : Activity() {
         previewLogo.visibility = View.GONE
         liveBadge.visibility = View.VISIBLE
         liveBadge.text = "TRAILER"
-        videoPreviewText.text = "Trailer no YouTube • ${entry.name}"
+        videoPreviewText.text = if (entry.kind == MediaKind.SERIES) {
+            "▶  Abrir série • ${seriesTitle(entry)}"
+        } else {
+            "▶  Assistir filme • ${entry.name}"
+        }
     }
 
     private fun startEmbeddedTrailerPreview(entry: CatalogEntry, url: String) {
@@ -2174,17 +2286,15 @@ class MainActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(-1, -2)
     }
 
-    private fun displaySynopsis(value: String): String = value
-        .replace("\\n", "\n")
-        .replace("<br>", "\n", ignoreCase = true)
-        .replace("<br/>", "\n", ignoreCase = true)
-        .replace("<br />", "\n", ignoreCase = true)
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace(Regex("\\s{2,}"), " ")
-        .trim()
+    private fun displaySynopsis(value: String): String {
+        if (value.isBlank()) return ""
+        val withBreaks = value.replace("\\n", "<br>")
+        val decoded = android.text.Html.fromHtml(withBreaks, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+        return decoded
+            .replace(Regex("[ \\t]{2,}"), " ")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+    }
 
     private fun seriesTitle(entry: CatalogEntry): String = entry.seriesGroup.ifBlank { entry.name }
 
@@ -2346,31 +2456,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun growCatalogIfMore() {
+        if (radioMode || !databaseBackedCatalog) {
+            catalogAdapter.submit(visibleItems(), selectedEntry?.key)
+            return
+        }
+        // Só acrescenta itens novos no fim da lista (usa notifyItemRangeInserted,
+        // não mexe nas linhas já visíveis nem recarrega as imagens delas) --
+        // por isso é seguro chamar mesmo com o usuário navegando ativamente.
+        if (pageLoading) return
+        pageFinished = false
+        loadNextPage()
+    }
+
     private fun applyPartialCatalogSnapshot(snapshot: CatalogSnapshot, stillLoading: Boolean) {
         if (snapshot.totalCount <= 0) return
         val wasHome = homeMode
         catalog = snapshot
         databaseBackedCatalog = snapshot.databaseBacked
-        categoryCache.clear()
-        categoryRequestId++
         greeting.text = if (stillLoading) {
             "Olá, usuário  •  ${snapshot.totalCount} itens carregados • atualizando..."
         } else {
             "Olá, usuário  •  ${snapshot.totalCount} itens"
         }
         if (!wasHome && !radioMode) {
-            // Não reconstrói a lista/categorias do zero enquanto o usuário está
-            // navegando ativamente dentro dela -- isso é o que causava o "piscar"
-            // e o foco voltando sozinho para a primeira categoria a cada 2s
-            // durante a importação em segundo plano. Itens novos continuam
-            // aparecendo normalmente via paginação ao rolar a lista.
-            val browsingCatalog = isWithin(currentFocus, categoryList) || isWithin(currentFocus, channelList)
-            if (!browsingCatalog) {
-                renderCategories()
-                renderCatalog()
-                if (selectedEntry == null) selectFirstVisible()
-                if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
-            }
+            // As categorias (pílulas) ainda são reconstruídas inteiras sempre que
+            // renderCategories() roda (mesmo quando o conteúdo final é igual),
+            // então isso continua pausado enquanto o usuário navega nelas para
+            // não derrubar o foco. Já a lista de itens agora só cresce por
+            // inserção, então pode atualizar sempre, sem exceção.
+            val browsingCategories = isWithin(currentFocus, categoryList)
+            if (!browsingCategories) renderCategories()
+            growCatalogIfMore()
+            if (selectedEntry == null) selectFirstVisible()
+            if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
         }
         renderVodStrip()
     }
@@ -3060,6 +3179,34 @@ class MainActivity : Activity() {
         getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putStringSet(PREF_FAVORITES, current).apply()
     }
 
+    // Contagem de "assistido" por canal, guardada separada do catalogo (que e
+    // apagado/reimportado periodicamente) para sobreviver a reimportacoes.
+    // Chave estavel: CatalogEntry.key (tvg-id + streamUrl), que nao muda entre
+    // reimportacoes do mesmo provedor.
+    private fun watchCounts(): MutableMap<String, Int> {
+        val raw = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_CHANNEL_WATCH_COUNTS, null).orEmpty()
+        if (raw.isBlank()) return mutableMapOf()
+        return runCatching {
+            val json = org.json.JSONObject(raw)
+            val map = mutableMapOf<String, Int>()
+            json.keys().forEach { key -> map[key] = json.optInt(key, 0) }
+            map
+        }.getOrDefault(mutableMapOf())
+    }
+
+    private fun recordChannelWatch(entry: CatalogEntry) {
+        if (entry.kind != MediaKind.LIVE || entry.key.isBlank()) return
+        val counts = watchCounts()
+        counts[entry.key] = (counts[entry.key] ?: 0) + 1
+        val json = org.json.JSONObject()
+        counts.forEach { (key, count) -> json.put(key, count) }
+        getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit()
+            .putString(PREF_CHANNEL_WATCH_COUNTS, json.toString())
+            .apply()
+    }
+
+    private fun mostWatchedChannelKey(): String? = watchCounts().maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key
+
     private fun editorialFor(entry: CatalogEntry): ChannelEditorial {
         val known = editorials.entries.firstOrNull { entry.name.lowercase().contains(it.key) }?.value
         return known ?: ChannelEditorial(
@@ -3168,6 +3315,7 @@ class MainActivity : Activity() {
     companion object {
         private const val PREF_FAVORITES = "favorite_catalog_keys"
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
+        private const val PREF_CHANNEL_WATCH_COUNTS = "channel_watch_counts"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"
         private const val PREF_MAC_ADDRESS = "mac_address"
         private const val PREF_SERVER_API_URL = "server_api_url"

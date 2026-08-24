@@ -29,6 +29,12 @@ class PlaylistRepository(private val context: Context) {
 
     private var externalMetadataByKey: Map<String, CatalogMetadata> = emptyMap()
     private var xtreamSource: XtreamSource? = null
+    // Cache do mapa nome->id (get_series / get_vod_streams) para não baixar e
+    // varrer a lista inteira do provedor de novo a cada série/filme aberto --
+    // isso podia ser bem lento/travar em catálogos grandes (dezenas de
+    // milhares de itens). Só roda de verdade fetchIdLookup na primeira vez
+    // por tipo, dentro do executor single-thread desta classe.
+    private val idLookupCache = mutableMapOf<MediaKind, Map<String, String>>()
 
     companion object {
         private const val MAX_FRAGMENT_CHARS = 1_048_576
@@ -127,6 +133,14 @@ class PlaylistRepository(private val context: Context) {
 
     fun queryGroups(kind: MediaKind, hidden: Set<String>, includeAdult: Boolean = false, callback: (List<String>) -> Unit) {
         executor.execute { callback(runCatching { database.groups(kind, hidden, includeAdult) }.getOrDefault(emptyList())) }
+    }
+
+    fun mostRecent(kind: MediaKind, hidden: Set<String>, callback: (CatalogEntry?) -> Unit) {
+        executor.execute { callback(runCatching { database.mostRecent(kind, hidden) }.getOrNull()) }
+    }
+
+    fun byKey(key: String, callback: (CatalogEntry?) -> Unit) {
+        executor.execute { callback(runCatching { database.byKey(key) }.getOrNull()) }
     }
 
     fun queryPage(
@@ -246,17 +260,26 @@ class PlaylistRepository(private val context: Context) {
     }.getOrDefault("")
 
     private fun resolveProviderId(source: XtreamSource, entry: CatalogEntry): String {
-        val action = if (entry.kind == MediaKind.SERIES) "get_series" else "get_vod_streams"
-        val root = requestJson(xtreamEndpoint(source, action)) ?: return ""
-        val array = if (entry.kind == MediaKind.SERIES) root.optJSONArray("series") else root.optJSONArray("vod_streams")
+        val lookup = idLookupCache.getOrPut(entry.kind) { fetchIdLookup(source, entry.kind) }
         val wanted = normalizeMetadataName(if (entry.kind == MediaKind.SERIES) entry.seriesGroup.ifBlank { entry.name } else entry.name)
-        val item = (0 until (array?.length() ?: 0)).asSequence()
-            .mapNotNull { array?.optJSONObject(it) }
-            .firstOrNull { normalizeMetadataName(it.optString("name")) == wanted }
-            ?: (0 until (array?.length() ?: 0)).asSequence()
-                .mapNotNull { array?.optJSONObject(it) }
-                .firstOrNull { val candidate = normalizeMetadataName(it.optString("name")); candidate.contains(wanted) || wanted.contains(candidate) }
-        return item?.optString(if (entry.kind == MediaKind.SERIES) "series_id" else "stream_id").orEmpty()
+        lookup[wanted]?.let { return it }
+        // Correspondência parcial só como último recurso (nomes com sufixos/prefixos leves).
+        return lookup.entries.firstOrNull { (name, _) -> name.contains(wanted) || wanted.contains(name) }?.value.orEmpty()
+    }
+
+    private fun fetchIdLookup(source: XtreamSource, kind: MediaKind): Map<String, String> {
+        val action = if (kind == MediaKind.SERIES) "get_series" else "get_vod_streams"
+        val root = requestJson(xtreamEndpoint(source, action)) ?: return emptyMap()
+        val array = if (kind == MediaKind.SERIES) root.optJSONArray("series") else root.optJSONArray("vod_streams")
+        val idField = if (kind == MediaKind.SERIES) "series_id" else "stream_id"
+        val map = LinkedHashMap<String, String>()
+        for (i in 0 until (array?.length() ?: 0)) {
+            val item = array?.optJSONObject(i) ?: continue
+            val name = normalizeMetadataName(item.optString("name"))
+            val id = item.optString(idField)
+            if (name.isNotBlank() && id.isNotBlank() && name !in map) map[name] = id
+        }
+        return map
     }
 
     private fun xtreamEndpoint(source: XtreamSource, action: String, parameter: String? = null, value: String? = null): String {

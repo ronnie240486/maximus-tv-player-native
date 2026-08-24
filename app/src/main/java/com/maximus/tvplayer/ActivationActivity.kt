@@ -285,6 +285,7 @@ class ActivationActivity : Activity() {
                     if (myGeneration != connectionGeneration) return@runOnUiThread
                     setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...")
                 }
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(PREF_IMPORT_PROGRESS_PERCENT, progress).apply()
             },
             onCatalogReady = { stats ->
                 runOnUiThread {
@@ -390,6 +391,7 @@ class ActivationActivity : Activity() {
                                 if (myGeneration != connectionGeneration) return@runOnUiThread
                                 setConnectionProgress(progress, if (progress >= 95) "Finalizando catálogo..." else "Organizando canais, filmes e séries...")
                             }
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(PREF_IMPORT_PROGRESS_PERCENT, progress).apply()
                         },
                         onCatalogReady = { stats ->
                             runOnUiThread {
@@ -504,6 +506,7 @@ class ActivationActivity : Activity() {
         const val PREFS_NAME = "maximus_device_preferences"
         const val PREF_MAC_ADDRESS = "mac_address"
         const val PREF_IMPORT_IN_PROGRESS = "catalog_import_in_progress"
+        const val PREF_IMPORT_PROGRESS_PERCENT = "catalog_import_progress_percent"
         private const val PREF_ACCESS_ALLOWED = "access_allowed"
 
         // Fonte alternativa (DNS/usuário/senha), independente do painel/MAC.

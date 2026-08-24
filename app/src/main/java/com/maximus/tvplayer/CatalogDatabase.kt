@@ -205,6 +205,23 @@ class CatalogDatabase(context: Context) {
     fun first(kind: MediaKind?, group: String, search: String, hidden: Set<String>, favorites: Set<String>, sortAlphabetically: Boolean): CatalogEntry? =
         queryPage(kind, group, search, hidden, favorites, sortAlphabetically, 1, 0).firstOrNull()
 
+    // "Mais recente" aqui é uma aproximação pela ordem de inserção (rowid),
+    // já que o M3U/Xtream importado não carrega uma data real de quando o
+    // item foi adicionado ao catálogo do provedor.
+    fun byKey(key: String): CatalogEntry? = runCatching {
+        helper.readableDatabase.rawQuery("SELECT * FROM $TABLE WHERE item_key=? LIMIT 1", arrayOf(key)).use { cursor ->
+            if (cursor.moveToFirst()) readEntry(cursor) else null
+        }
+    }.getOrNull()
+
+    fun mostRecent(kind: MediaKind, hidden: Set<String>): CatalogEntry? = runCatching {
+        val db = helper.readableDatabase
+        val args = mutableListOf(kind.name)
+        val hiddenClause = hiddenClause(hidden, args)
+        val sql = "SELECT * FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause ORDER BY rowid DESC LIMIT 1"
+        db.rawQuery(sql, args.toTypedArray()).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
+    }.getOrNull()
+
     fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>, includeAdult: Boolean = false): List<String> {
         val db = helper.readableDatabase
         val where = mutableListOf("kind=?", "series_group=?")
