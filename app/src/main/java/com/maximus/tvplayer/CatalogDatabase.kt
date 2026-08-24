@@ -218,7 +218,12 @@ class CatalogDatabase(context: Context) {
         val db = helper.readableDatabase
         val args = mutableListOf(kind.name)
         val hiddenClause = hiddenClause(hidden, args)
-        val sql = "SELECT * FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause ORDER BY rowid DESC LIMIT 1"
+        // Antes usava "ORDER BY rowid DESC" como aproximação de "recém
+        // adicionado", mas a ordem do catálogo do provedor é essencialmente
+        // fixa entre importações -- na prática, o item nunca mudava. Sorteia
+        // um item aleatório em vez disso, pra garantir variedade real cada
+        // vez que a Home é aberta.
+        val sql = "SELECT * FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause ORDER BY RANDOM() LIMIT 1"
         db.rawQuery(sql, args.toTypedArray()).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
     }.getOrNull()
 
@@ -234,7 +239,7 @@ class CatalogDatabase(context: Context) {
             val hiddenClause = hiddenClause(hidden, args)
             val keywordClause = keywords.joinToString(" OR ") { "LOWER(group_title) LIKE ?" }
             keywords.forEach { args += "%${it.lowercase()}%" }
-            val sql = "SELECT * FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause AND ($keywordClause) ORDER BY rowid DESC LIMIT 1"
+            val sql = "SELECT * FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause AND ($keywordClause) ORDER BY RANDOM() LIMIT 1"
             db.rawQuery(sql, args.toTypedArray()).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
         }.getOrNull()
     }

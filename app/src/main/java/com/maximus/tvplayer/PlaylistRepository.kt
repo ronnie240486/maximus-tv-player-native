@@ -235,8 +235,12 @@ class PlaylistRepository(private val context: Context) {
         XtreamSource("${uri.scheme}://${uri.authority}".trimEnd('/'), username, password)
     }.getOrNull()
 
+    @Volatile var lastMetadataDebug: String = ""
+        private set
+
     private fun fetchExternalMetadata(entry: CatalogEntry): CatalogMetadata? {
-        val source = xtreamSource ?: parseXtreamSource(entry.streamUrl) ?: return null
+        val source = xtreamSource ?: parseXtreamSource(entry.streamUrl)
+        if (source == null) { lastMetadataDebug = "sem fonte Xtream (streamUrl: ${entry.streamUrl.take(60)})"; return null }
         val directId = if (entry.kind == MediaKind.SERIES) {
             entry.tvgId.filter(Char::isDigit).ifBlank { extractProviderId(entry.streamUrl) }
         } else {
@@ -244,13 +248,22 @@ class PlaylistRepository(private val context: Context) {
         }
         val action = if (entry.kind == MediaKind.SERIES) "get_series_info" else "get_vod_info"
         val parameter = if (entry.kind == MediaKind.SERIES) "series_id" else "vod_id"
-        val directMetadata = directId.takeIf { it.isNotBlank() }
-            ?.let { requestJson(xtreamEndpoint(source, action, parameter, it)) }
-            ?.let(::parseExternalMetadata)
-        if (directMetadata?.hasAnyData() == true) return directMetadata
+        val directJson = directId.takeIf { it.isNotBlank() }?.let { requestJson(xtreamEndpoint(source, action, parameter, it)) }
+        val directMetadata = directJson?.let(::parseExternalMetadata)
+        if (directMetadata?.hasAnyData() == true) { lastMetadataDebug = "ok (id direto $directId)"; return directMetadata }
         val resolvedId = resolveProviderId(source, entry)
-        if (resolvedId.isBlank() || resolvedId == directId) return directMetadata
-        return requestJson(xtreamEndpoint(source, action, parameter, resolvedId))?.let(::parseExternalMetadata)
+        if (resolvedId.isBlank() || resolvedId == directId) {
+            lastMetadataDebug = when {
+                directId.isBlank() -> "sem id direto e sem id resolvido pelo nome"
+                directJson == null -> "requisicao falhou (id direto $directId, timeout ou erro HTTP)"
+                else -> "resposta sem dados uteis (id direto $directId): ${directJson.toString().take(120)}"
+            }
+            return directMetadata
+        }
+        val resolvedJson = requestJson(xtreamEndpoint(source, action, parameter, resolvedId))
+        val resolvedMetadata = resolvedJson?.let(::parseExternalMetadata)
+        lastMetadataDebug = if (resolvedMetadata?.hasAnyData() == true) "ok (id resolvido por nome $resolvedId)" else "id resolvido por nome ($resolvedId) tambem sem dados uteis"
+        return resolvedMetadata
     }
 
     private fun parseExternalMetadata(root: JSONObject): CatalogMetadata {
