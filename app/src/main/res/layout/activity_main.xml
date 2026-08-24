@@ -149,6 +149,38 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/importProgressBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/activation_input_background"
+                android:orientation="vertical"
+                android:paddingStart="12dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="8dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/importProgressText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⏳ 0%  •  Seu conteúdo está sendo carregado. Já já você terá o melhor conteúdo!"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp" />
+
+                <ProgressBar
+                    android:id="@+id/importProgressBar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="6dp"
+                    android:layout_marginTop="5dp"
+                    android:max="100"
+                    android:progress="0" />
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/searchHint"
                 android:layout_width="match_parent"

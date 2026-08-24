@@ -26,6 +26,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
@@ -74,6 +75,9 @@ class MainActivity : Activity() {
     private lateinit var searchHint: TextView
     private lateinit var liveHeader: TextView
     private lateinit var greeting: TextView
+    private lateinit var importProgressBanner: LinearLayout
+    private lateinit var importProgressText: TextView
+    private lateinit var importProgressBar: ProgressBar
     private lateinit var channelHeading: TextView
     private lateinit var videoPreviewText: TextView
     private lateinit var previewLogo: ImageView
@@ -154,8 +158,10 @@ class MainActivity : Activity() {
             if (!catalogImportInProgress) return
             repository.loadCached { snapshot ->
                 runOnUiThread {
-                    val stillLoading = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
-                        .getBoolean(ActivationActivity.PREF_IMPORT_IN_PROGRESS, true)
+                    val importPrefs = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE)
+                    val stillLoading = importPrefs.getBoolean(ActivationActivity.PREF_IMPORT_IN_PROGRESS, true)
+                    val percent = importPrefs.getInt(ActivationActivity.PREF_IMPORT_PROGRESS_PERCENT, 0)
+                    updateImportProgressBanner(stillLoading, percent)
                     if (snapshot != null && snapshot.totalCount > 0 && snapshot.totalCount != catalog.totalCount) {
                         applyPartialCatalogSnapshot(snapshot, stillLoading)
                     }
@@ -163,6 +169,20 @@ class MainActivity : Activity() {
                     if (stillLoading) mainHandler.postDelayed(this, 2_000)
                 }
             }
+        }
+    }
+
+    private fun updateImportProgressBanner(stillLoading: Boolean, percent: Int) {
+        if (!stillLoading) {
+            if (importProgressBanner.visibility != View.GONE) importProgressBanner.visibility = View.GONE
+            return
+        }
+        importProgressBanner.visibility = View.VISIBLE
+        importProgressBar.progress = percent.coerceIn(0, 100)
+        importProgressText.text = when {
+            percent <= 0 -> "⏳ Preparando seu conteúdo..."
+            percent >= 95 -> "⏳ $percent%  •  Quase lá! Finalizando o catálogo..."
+            else -> "⏳ $percent%  •  Seu conteúdo está sendo carregado. Já já você terá o melhor conteúdo!"
         }
     }
 
@@ -253,6 +273,9 @@ class MainActivity : Activity() {
         searchHint = findViewById(R.id.searchHint)
         liveHeader = findViewById(R.id.liveHeader)
         greeting = findViewById(R.id.greeting)
+        importProgressBanner = findViewById(R.id.importProgressBanner)
+        importProgressText = findViewById(R.id.importProgressText)
+        importProgressBar = findViewById(R.id.importProgressBar)
         channelHeading = findViewById(R.id.channelHeading)
         videoPreviewText = findViewById(R.id.videoPreviewText)
         previewLogo = findViewById(R.id.previewLogo)
