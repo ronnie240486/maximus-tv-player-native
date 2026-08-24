@@ -1564,6 +1564,7 @@ class MainActivity : Activity() {
         } else {
             recordChannelWatch(entry)
             startMiniPlayer(entry)
+            expandMiniPlayer()
         }
     }
 
@@ -3346,23 +3347,56 @@ class MainActivity : Activity() {
         renderNavigation()
         val command = spoken.trim().lowercase(Locale.ROOT)
         when {
-            command.contains("rádio") || command.contains("radio") -> showRadioDialog()
-            command.contains("filme") -> switchSection(MediaKind.MOVIE)
-            command.contains("série") || command.contains("serie") -> switchSection(MediaKind.SERIES)
-            command.contains("canal") -> switchSection(MediaKind.LIVE)
-            command.contains("favorito") -> switchFavorites()
-            command.contains("início") || command.contains("inicio") || command.contains("home") -> showHome()
-            command.contains("buscar") || command.contains("pesquisar") -> showSearchDialog()
-            else -> {
-                query = spoken.trim()
-                searchHint.text = if (query.isBlank()) searchPlaceholder() else query
-                if (radioMode) showRadioDialog() else {
-                    renderCatalog()
-                    selectFirstVisible()
+            command.contains("rádio") || command.contains("radio") -> { showRadioDialog(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("filme") -> { switchSection(MediaKind.MOVIE); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("série") || command.contains("serie") -> { switchSection(MediaKind.SERIES); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("canal") -> { switchSection(MediaKind.LIVE); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("favorito") -> { switchFavorites(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("início") || command.contains("inicio") || command.contains("home") -> { showHome(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("buscar") || command.contains("pesquisar") -> { showSearchDialog(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            else -> openBySpokenName(spoken.trim())
+        }
+    }
+
+    // Diz um nome (canal, filme ou série) e o app abre direto, seja qual for a
+    // tela em que o usuário estiver -- busca nos três tipos de conteúdo de
+    // uma vez, não só na seção atual.
+    private fun openBySpokenName(spokenQuery: String) {
+        if (spokenQuery.isBlank()) return
+        if (!databaseBackedCatalog) {
+            query = spokenQuery
+            searchHint.text = query
+            if (radioMode) showRadioDialog() else { renderCatalog(); selectFirstVisible() }
+            Toast.makeText(this, "Comando: $spokenQuery", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val hidden = hiddenGroups()
+        val kinds = listOf(MediaKind.LIVE, MediaKind.MOVIE, MediaKind.SERIES)
+        val found = arrayOfNulls<CatalogEntry>(kinds.size)
+        var pending = kinds.size
+        fun finish() {
+            pending--
+            if (pending > 0) return
+            val match = found.firstNotNullOfOrNull { it }
+            if (match != null) {
+                switchSection(match.kind)
+                handleEntryClick(match)
+                Toast.makeText(this, "Abrindo \"${match.name}\"", Toast.LENGTH_SHORT).show()
+            } else {
+                query = spokenQuery
+                searchHint.text = query
+                if (radioMode) showRadioDialog() else { renderCatalog(); selectFirstVisible() }
+                Toast.makeText(this, "Nenhum resultado para \"$spokenQuery\"", Toast.LENGTH_SHORT).show()
+            }
+        }
+        kinds.forEachIndexed { index, kind ->
+            repository.queryPage(kind, "Todos", spokenQuery, hidden, emptySet(), false, 1, 0, includeAdult = parentalUnlocked) { results ->
+                runOnUiThread {
+                    found[index] = results.firstOrNull()
+                    finish()
                 }
             }
         }
-        Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show()
     }
 
     private fun showCatalogRulesDialog() {
