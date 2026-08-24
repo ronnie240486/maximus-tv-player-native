@@ -103,22 +103,27 @@ class CatalogDatabase(context: Context) {
     }
 
     fun groups(kind: MediaKind, hidden: Set<String>, includeAdult: Boolean = false): List<String> {
-        val db = helper.readableDatabase
-        val args = mutableListOf(kind.name)
-        val hiddenClause = hiddenClause(hidden, args)
-        val sql = "SELECT DISTINCT group_title FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause ORDER BY group_title COLLATE NOCASE"
-        val groups = db.rawQuery(sql, args.toTypedArray()).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) add(cursor.getString(0).orEmpty().ifBlank { "Sem categoria" })
+        val attempt = {
+            val db = helper.readableDatabase
+            val args = mutableListOf(kind.name)
+            val hiddenClause = hiddenClause(hidden, args)
+            val sql = "SELECT DISTINCT group_title FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause ORDER BY group_title COLLATE NOCASE"
+            val groups = db.rawQuery(sql, args.toTypedArray()).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) add(cursor.getString(0).orEmpty().ifBlank { "Sem categoria" })
+                }
+            }.toMutableList()
+            if (includeAdult) {
+                val adultArgs = mutableListOf(kind.name)
+                val adultHiddenClause = hiddenClause(hidden, adultArgs)
+                val hasAdult = db.rawQuery("SELECT 1 FROM $TABLE WHERE kind=? AND is_adult=1 $adultHiddenClause LIMIT 1", adultArgs.toTypedArray()).use { it.moveToFirst() }
+                if (hasAdult) groups += ContentSafety.LOCKED_CATEGORY
             }
-        }.toMutableList()
-        if (includeAdult) {
-            val adultArgs = mutableListOf(kind.name)
-            val adultHiddenClause = hiddenClause(hidden, adultArgs)
-            val hasAdult = db.rawQuery("SELECT 1 FROM $TABLE WHERE kind=? AND is_adult=1 $adultHiddenClause LIMIT 1", adultArgs.toTypedArray()).use { it.moveToFirst() }
-            if (hasAdult) groups += ContentSafety.LOCKED_CATEGORY
+            groups
         }
-        return groups
+        // Leitura durante importação pesada pode falhar por contenção transitória;
+        // uma segunda tentativa evita que as categorias somem da tela à toa.
+        return runCatching(attempt).getOrNull() ?: runCatching(attempt).getOrDefault(emptyList())
     }
 
     fun queryPage(
