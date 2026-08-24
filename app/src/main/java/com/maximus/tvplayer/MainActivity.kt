@@ -2161,7 +2161,12 @@ class MainActivity : Activity() {
         if (requestFocus) {
             channelList.post {
                 configureExplicitFocusGraph()
-                focusSelectedCatalogItem() || focusFirstCatalogItem()
+                if (!focusSelectedCatalogItem()) {
+                    val key = selectedEntry?.key
+                    val position = catalogAdapter.positionOf(key)
+                    Toast.makeText(this, "DIAG2: falhou (key=$key pos=$position itens=${catalogAdapter.itemCount})", Toast.LENGTH_LONG).show()
+                    focusFirstCatalogItem()
+                }
             }
         } else {
             channelList.post { configureExplicitFocusGraph() }
