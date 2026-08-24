@@ -2346,31 +2346,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun growCatalogIfMore() {
+        if (radioMode || !databaseBackedCatalog) {
+            catalogAdapter.submit(visibleItems(), selectedEntry?.key)
+            return
+        }
+        // Só acrescenta itens novos no fim da lista (usa notifyItemRangeInserted,
+        // não mexe nas linhas já visíveis nem recarrega as imagens delas) --
+        // por isso é seguro chamar mesmo com o usuário navegando ativamente.
+        if (pageLoading) return
+        pageFinished = false
+        loadNextPage()
+    }
+
     private fun applyPartialCatalogSnapshot(snapshot: CatalogSnapshot, stillLoading: Boolean) {
         if (snapshot.totalCount <= 0) return
         val wasHome = homeMode
         catalog = snapshot
         databaseBackedCatalog = snapshot.databaseBacked
-        categoryCache.clear()
-        categoryRequestId++
         greeting.text = if (stillLoading) {
             "Olá, usuário  •  ${snapshot.totalCount} itens carregados • atualizando..."
         } else {
             "Olá, usuário  •  ${snapshot.totalCount} itens"
         }
         if (!wasHome && !radioMode) {
-            // Não reconstrói a lista/categorias do zero enquanto o usuário está
-            // navegando ativamente dentro dela -- isso é o que causava o "piscar"
-            // e o foco voltando sozinho para a primeira categoria a cada 2s
-            // durante a importação em segundo plano. Itens novos continuam
-            // aparecendo normalmente via paginação ao rolar a lista.
-            val browsingCatalog = isWithin(currentFocus, categoryList) || isWithin(currentFocus, channelList)
-            if (!browsingCatalog) {
-                renderCategories()
-                renderCatalog()
-                if (selectedEntry == null) selectFirstVisible()
-                if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
-            }
+            // As categorias (pílulas) ainda são reconstruídas inteiras sempre que
+            // renderCategories() roda (mesmo quando o conteúdo final é igual),
+            // então isso continua pausado enquanto o usuário navega nelas para
+            // não derrubar o foco. Já a lista de itens agora só cresce por
+            // inserção, então pode atualizar sempre, sem exceção.
+            val browsingCategories = isWithin(currentFocus, categoryList)
+            if (!browsingCategories) renderCategories()
+            growCatalogIfMore()
+            if (selectedEntry == null) selectFirstVisible()
+            if (currentFocus == null) channelList.post { focusFirstCatalogItem() || focusNavigationForCurrentSection() }
         }
         renderVodStrip()
     }
