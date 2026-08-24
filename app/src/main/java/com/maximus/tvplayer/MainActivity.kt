@@ -1562,10 +1562,10 @@ class MainActivity : Activity() {
     // (calculada a partir do recorte original: a área xadrez/transparente
     // onde o vídeo deve aparecer).
     private object TvFrameScreen {
-        const val LEFT = 0.2324f
-        const val TOP = 0.2130f
-        const val WIDTH = 0.4473f
-        const val HEIGHT = 0.5517f
+        const val LEFT = 0.1477f
+        const val TOP = 0.1678f
+        const val WIDTH = 0.5890f
+        const val HEIGHT = 0.6085f
     }
 
     // Encaixa a view de conteúdo (player/webview) exatamente no "buraco da
