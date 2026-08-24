@@ -348,8 +348,8 @@ class PlaylistRepository(private val context: Context) {
 
     private fun requestJson(endpoint: String): JSONObject? = runCatching {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 20_000
+            connectTimeout = 6_000
+            readTimeout = 8_000
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "MaximusTVPlayer/1.0 AndroidTV")
         }

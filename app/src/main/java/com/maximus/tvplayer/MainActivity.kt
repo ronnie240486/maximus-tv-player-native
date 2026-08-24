@@ -2228,8 +2228,17 @@ class MainActivity : Activity() {
         views.tags.text = listOf(entry.groupTitle, cachedMeta?.year?.ifBlank { entry.year } ?: entry.year, kindLabel(entry.kind)).filter { it.isNotBlank() }.joinToString("   •   ")
         val backdropSource = cachedMeta?.backdrop?.ifBlank { entry.backdropUrl }?.ifBlank { entry.logoUrl } ?: entry.backdropUrl.ifBlank { entry.logoUrl }
         imageLoader.load(backdropSource, views.backdrop, fallbackImage)
+        var answered = initialSynopsis.isNotBlank()
+        if (!answered) {
+            mainHandler.postDelayed({
+                if (!answered && views.synopsis.text.toString() == "Buscando sinopse...") {
+                    views.synopsis.text = "Sinopse não encontrada. Tente novamente mais tarde."
+                }
+            }, 15_000L)
+        }
         repository.enrichMetadata(entry) { metadata ->
             runOnUiThread {
+                answered = true
                 if (metadata != null) {
                     if (metadata.synopsis.isNotBlank()) views.synopsis.text = displaySynopsis(metadata.synopsis)
                     if (metadata.backdrop.isNotBlank()) imageLoader.load(metadata.backdrop, views.backdrop, fallbackImage)
