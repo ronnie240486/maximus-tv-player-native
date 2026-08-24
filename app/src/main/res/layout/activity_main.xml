@@ -303,6 +303,15 @@
                         android:layout_height="match_parent"
                         android:background="#66080B16" />
 
+                    <ImageView
+                        android:id="@+id/tvFrameOverlay"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/tv_frame_overlay"
+                        android:visibility="gone" />
+
                     <TextView
                         android:id="@+id/videoPreviewText"
                         android:layout_width="match_parent"

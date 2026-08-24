@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.RecognizerIntent
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
@@ -82,6 +83,7 @@ class MainActivity : Activity() {
     private lateinit var videoPreviewText: TextView
     private lateinit var previewLogo: ImageView
     private lateinit var heroImage: ImageView
+    private lateinit var tvFrameOverlay: ImageView
     private lateinit var liveBadge: TextView
     private lateinit var detailEyebrow: TextView
     private lateinit var detailChannelName: TextView
@@ -290,6 +292,8 @@ class MainActivity : Activity() {
         videoPreviewText = findViewById(R.id.videoPreviewText)
         previewLogo = findViewById(R.id.previewLogo)
         heroImage = findViewById(R.id.heroImage)
+        tvFrameOverlay = findViewById(R.id.tvFrameOverlay)
+        tvFrameOverlay.visibility = View.VISIBLE
         liveBadge = findViewById(R.id.liveBadge)
         detailEyebrow = findViewById(R.id.detailEyebrow)
         detailChannelName = findViewById(R.id.detailChannelName)
@@ -899,6 +903,7 @@ class MainActivity : Activity() {
             fallbackLogo = ::fallbackLogo,
             onSelected = { selectEntry(it, false) },
             onClicked = { handleEntryClick(it) },
+            onLongClicked = { quickToggleFavorite(it) },
         )
         channelList.layoutManager = LinearLayoutManager(this)
         channelList.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
@@ -1026,20 +1031,20 @@ class MainActivity : Activity() {
     private fun renderHomeFeaturedCards() {
         if (!databaseBackedCatalog) return
         val hidden = hiddenGroups()
-        repository.mostRecent(MediaKind.MOVIE, hidden) { entry ->
-            runOnUiThread {
-                if (!homeMode || entry == null) return@runOnUiThread
-                featuredMovie = entry
-                homeMoviesCardTitle.text = entry.name
-                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeMoviesCardImage, R.drawable.home_movies_card)
+        val movieKeywords = listOf("lançamento", "lancamento", "animação", "animacao", "desenho")
+        val seriesKeywords = listOf("lançamento", "lancamento", "novidade")
+        repository.mostRecentInGroups(MediaKind.MOVIE, movieKeywords, hidden) { fromGroup ->
+            if (fromGroup != null) {
+                applyFeaturedMovie(fromGroup)
+            } else {
+                repository.mostRecent(MediaKind.MOVIE, hidden) { entry -> if (entry != null) applyFeaturedMovie(entry) }
             }
         }
-        repository.mostRecent(MediaKind.SERIES, hidden) { entry ->
-            runOnUiThread {
-                if (!homeMode || entry == null) return@runOnUiThread
-                featuredSeries = entry
-                homeSeriesCardTitle.text = seriesTitle(entry)
-                imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeSeriesCardImage, R.drawable.home_series_card)
+        repository.mostRecentInGroups(MediaKind.SERIES, seriesKeywords, hidden) { fromGroup ->
+            if (fromGroup != null) {
+                applyFeaturedSeries(fromGroup)
+            } else {
+                repository.mostRecent(MediaKind.SERIES, hidden) { entry -> if (entry != null) applyFeaturedSeries(entry) }
             }
         }
         val watchedKey = mostWatchedChannelKey()
@@ -1057,6 +1062,24 @@ class MainActivity : Activity() {
                 homeCartoonsCardTitle.text = entry.name
                 imageLoader.load(entry.logoUrl, homeCartoonsCardImage, R.drawable.home_cartoons_card)
             }
+        }
+    }
+
+    private fun applyFeaturedMovie(entry: CatalogEntry) {
+        runOnUiThread {
+            if (!homeMode) return@runOnUiThread
+            featuredMovie = entry
+            homeMoviesCardTitle.text = entry.name
+            imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeMoviesCardImage, R.drawable.home_movies_card)
+        }
+    }
+
+    private fun applyFeaturedSeries(entry: CatalogEntry) {
+        runOnUiThread {
+            if (!homeMode) return@runOnUiThread
+            featuredSeries = entry
+            homeSeriesCardTitle.text = seriesTitle(entry)
+            imageLoader.load(entry.backdropUrl.ifBlank { entry.logoUrl }, homeSeriesCardImage, R.drawable.home_series_card)
         }
     }
 
@@ -1183,12 +1206,13 @@ class MainActivity : Activity() {
             renderCategoryButtons(listOf("Todos") + radioRepository.categories())
             return
         }
+        val favoritesPill = if (favoritesOnly) emptyList() else listOf(FAVORITES_CATEGORY_LABEL)
         if (databaseBackedCatalog) {
             val requestKind = currentKind
             val requestId = ++categoryRequestId
             val cachedGroups = categoryCache[requestKind].orEmpty()
             categoryList.removeAllViews()
-            renderCategoryButtons(listOf("Todos") + cachedGroups)
+            renderCategoryButtons(favoritesPill + listOf("Todos") + cachedGroups)
             repository.queryGroups(requestKind, hiddenGroups(), includeAdult = true) { groups ->
                 runOnUiThread {
                     if (!databaseBackedCatalog || currentKind != requestKind || requestId != categoryRequestId) return@runOnUiThread
@@ -1197,14 +1221,14 @@ class MainActivity : Activity() {
                         normalizedGroups.filter { it == ContentSafety.LOCKED_CATEGORY }
                     if (freshGroups == cachedGroups) return@runOnUiThread
                     categoryCache[requestKind] = freshGroups
-                    if (selectedCategory != "Todos" && selectedCategory !in freshGroups) selectedCategory = "Todos"
-                    renderCategoryButtons(listOf("Todos") + freshGroups)
+                    if (selectedCategory != "Todos" && selectedCategory != FAVORITES_CATEGORY_LABEL && selectedCategory !in freshGroups) selectedCategory = "Todos"
+                    renderCategoryButtons(favoritesPill + listOf("Todos") + freshGroups)
                     if (currentFocus == null || isWithin(currentFocus, navItems)) categoryList.post { focusFirstCategory() }
                 }
             }
             return
         }
-        renderCategoryButtons(listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted())
+        renderCategoryButtons(favoritesPill + listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted())
     }
 
     private fun repaintCategorySelection() {
@@ -1287,16 +1311,17 @@ class MainActivity : Activity() {
         pageLoading = true
         val requestId = pageRequestId
         val offset = pagedItems.size
+        val favoritesPillActive = selectedCategory == FAVORITES_CATEGORY_LABEL
         repository.queryPage(
             kind = if (favoritesOnly) null else currentKind,
-            group = selectedCategory,
+            group = if (favoritesPillActive) "Todos" else selectedCategory,
             search = query,
             hidden = hiddenGroups(),
-            favorites = if (favoritesOnly) favorites() else emptySet(),
+            favorites = if (favoritesOnly || favoritesPillActive) favorites() else emptySet(),
             sortAlphabetically = sortAlphabetically,
             limit = pageSize,
             offset = offset,
-            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
+            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly && !favoritesPillActive,
             includeAdult = parentalUnlocked,
         ) { page ->
             runOnUiThread {
@@ -1341,7 +1366,10 @@ class MainActivity : Activity() {
 
     private fun visibleItems(): List<CatalogEntry> {
         var result = currentItems()
-        if (selectedCategory != "Todos") {
+        if (selectedCategory == FAVORITES_CATEGORY_LABEL) {
+            val favKeys = favorites()
+            result = result.filter { it.key in favKeys }
+        } else if (selectedCategory != "Todos") {
             result = if (selectedCategory == ContentSafety.LOCKED_CATEGORY) {
                 result.filter { parentalUnlocked && ContentSafety.isAdult(it) }
             } else {
@@ -1463,16 +1491,17 @@ class MainActivity : Activity() {
         }
         if (databaseBackedCatalog) {
             val requestId = pageRequestId
+            val favoritesPillActive = selectedCategory == FAVORITES_CATEGORY_LABEL
             repository.queryPage(
                 kind = if (favoritesOnly) null else currentKind,
-                group = selectedCategory,
+                group = if (favoritesPillActive) "Todos" else selectedCategory,
                 search = query,
                 hidden = hiddenGroups(),
-                favorites = if (favoritesOnly) favorites() else emptySet(),
+                favorites = if (favoritesOnly || favoritesPillActive) favorites() else emptySet(),
                 sortAlphabetically = sortAlphabetically,
                 limit = 1,
                 offset = 0,
-                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
+                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly && !favoritesPillActive,
                 includeAdult = parentalUnlocked,
                 ) { page ->
                 runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
@@ -1529,6 +1558,36 @@ class MainActivity : Activity() {
     }
 
 
+    // Fração da área de "tela" dentro da imagem da moldura de TV antiga
+    // (calculada a partir do recorte original: a área xadrez/transparente
+    // onde o vídeo deve aparecer).
+    private object TvFrameScreen {
+        const val LEFT = 0.2324f
+        const val TOP = 0.2130f
+        const val WIDTH = 0.4473f
+        const val HEIGHT = 0.5517f
+    }
+
+    // Encaixa a view de conteúdo (player/webview) exatamente no "buraco da
+    // tela" da moldura, considerando como a imagem foi de fato desenhada
+    // dentro do ImageView (fitCenter pode deixar barras vazias nas laterais
+    // ou em cima/embaixo, dependendo da proporção do container).
+    private fun fitContentToTvFrame(content: View) {
+        tvFrameOverlay.post {
+            val drawable = tvFrameOverlay.drawable ?: return@post
+            val bounds = RectF(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
+            tvFrameOverlay.imageMatrix.mapRect(bounds)
+            if (bounds.width() <= 0f || bounds.height() <= 0f) return@post
+            val params = (content.layoutParams as? FrameLayout.LayoutParams) ?: FrameLayout.LayoutParams(-1, -1)
+            params.width = (bounds.width() * TvFrameScreen.WIDTH).toInt()
+            params.height = (bounds.height() * TvFrameScreen.HEIGHT).toInt()
+            params.gravity = Gravity.NO_GRAVITY
+            params.leftMargin = (bounds.left + bounds.width() * TvFrameScreen.LEFT).toInt()
+            params.topMargin = (bounds.top + bounds.height() * TvFrameScreen.TOP).toInt()
+            content.layoutParams = params
+        }
+    }
+
     private fun startMiniPlayer(entry: CatalogEntry, sourceUrl: String = entry.streamUrl, previewTitle: String = entry.name, mode: PreviewMode = PreviewMode.CONTENT) {
         if (sourceUrl.isBlank()) {
             Toast.makeText(this, "Este item não possui uma transmissão válida", Toast.LENGTH_SHORT).show()
@@ -1547,6 +1606,7 @@ class MainActivity : Activity() {
             isClickable = false
         }
         videoPreview.addView(playerView, 1)
+        fitContentToTvFrame(playerView)
         if (radioMode && entry.kind == MediaKind.LIVE) {
             radioVisualizer = RadioWaveView(this).apply {
                 layoutParams = FrameLayout.LayoutParams(-1, -1)
@@ -1637,7 +1697,11 @@ class MainActivity : Activity() {
 
     private fun youtubeVideoPageUrl(videoId: String): String {
         val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        return "https://www.youtube.com/watch?v=$safeId&autoplay=1&playsinline=1&mute=0&rel=0"
+        // Endpoint oficial de embed: vem só com o player, sem cabeçalho, canal,
+        // inscrever-se, comentários, etc -- mais confiável do que tentar
+        // esconder pedaços da página completa do YouTube via CSS, cuja
+        // estrutura muda com frequência.
+        return "https://www.youtube-nocookie.com/embed/$safeId?autoplay=1&playsinline=1&mute=0&rel=0&controls=1&modestbranding=1&iv_load_policy=3&fs=0"
     }
 
     private fun loadYoutubeVideoPage(webView: WebView, videoId: String) {
@@ -1712,6 +1776,7 @@ class MainActivity : Activity() {
         webView.isClickable = true
         webView.setOnClickListener { handleEntryClick(entry) }
         videoPreview.addView(webView, 1)
+        fitContentToTvFrame(webView)
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
         previewMode = PreviewMode.TRAILER
@@ -1852,6 +1917,7 @@ class MainActivity : Activity() {
                     playerView.setOnClickListener { expandedEntry?.let { handleEntryClick(it) } }
                 }
                 videoPreview.addView(content, 1)
+                fitContentToTvFrame(content)
                 miniPlayerDialog = null
             }
         }
@@ -3179,6 +3245,17 @@ class MainActivity : Activity() {
         getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putStringSet(PREF_FAVORITES, current).apply()
     }
 
+    // Atalho: segurar OK em cima de um item na lista favorita/desfavorita na
+    // hora, sem precisar navegar até o botão de favoritar no painel de
+    // detalhes.
+    private fun quickToggleFavorite(entry: CatalogEntry) {
+        val wasFavorite = entry.key in favorites()
+        toggleFavorite(entry)
+        Toast.makeText(this, if (wasFavorite) "Removido dos favoritos" else "★ Adicionado aos favoritos", Toast.LENGTH_SHORT).show()
+        if (selectedEntry?.key == entry.key) renderActions(entry)
+        if (selectedCategory == FAVORITES_CATEGORY_LABEL || favoritesOnly) renderCatalog()
+    }
+
     // Contagem de "assistido" por canal, guardada separada do catalogo (que e
     // apagado/reimportado periodicamente) para sobreviver a reimportacoes.
     // Chave estavel: CatalogEntry.key (tvg-id + streamUrl), que nao muda entre
@@ -3316,6 +3393,7 @@ class MainActivity : Activity() {
         private const val PREF_FAVORITES = "favorite_catalog_keys"
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
         private const val PREF_CHANNEL_WATCH_COUNTS = "channel_watch_counts"
+        private const val FAVORITES_CATEGORY_LABEL = "★ Favoritos"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"
         private const val PREF_MAC_ADDRESS = "mac_address"
         private const val PREF_SERVER_API_URL = "server_api_url"

@@ -139,6 +139,10 @@ class PlaylistRepository(private val context: Context) {
         executor.execute { callback(runCatching { database.mostRecent(kind, hidden) }.getOrNull()) }
     }
 
+    fun mostRecentInGroups(kind: MediaKind, keywords: List<String>, hidden: Set<String>, callback: (CatalogEntry?) -> Unit) {
+        executor.execute { callback(runCatching { database.mostRecentInGroups(kind, keywords, hidden) }.getOrNull()) }
+    }
+
     fun byKey(key: String, callback: (CatalogEntry?) -> Unit) {
         executor.execute { callback(runCatching { database.byKey(key) }.getOrNull()) }
     }

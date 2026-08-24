@@ -222,6 +222,23 @@ class CatalogDatabase(context: Context) {
         db.rawQuery(sql, args.toTypedArray()).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
     }.getOrNull()
 
+    // Busca o item mais recente dentro de categorias cujo nome contenha um
+    // dos termos dados (ex.: "lançamento", "animação"), usado nos cards de
+    // destaque da tela inicial. Se nenhuma categoria bater, retorna null e
+    // quem chamou decide o fallback (ex.: mostRecent() geral).
+    fun mostRecentInGroups(kind: MediaKind, keywords: List<String>, hidden: Set<String>): CatalogEntry? {
+        if (keywords.isEmpty()) return null
+        return runCatching {
+            val db = helper.readableDatabase
+            val args = mutableListOf(kind.name)
+            val hiddenClause = hiddenClause(hidden, args)
+            val keywordClause = keywords.joinToString(" OR ") { "LOWER(group_title) LIKE ?" }
+            keywords.forEach { args += "%${it.lowercase()}%" }
+            val sql = "SELECT * FROM $TABLE WHERE kind=? AND is_adult=0 $hiddenClause AND ($keywordClause) ORDER BY rowid DESC LIMIT 1"
+            db.rawQuery(sql, args.toTypedArray()).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
+        }.getOrNull()
+    }
+
     fun querySeriesSeasons(seriesGroup: String, group: String, hidden: Set<String>, includeAdult: Boolean = false): List<String> {
         val db = helper.readableDatabase
         val where = mutableListOf("kind=?", "series_group=?")
