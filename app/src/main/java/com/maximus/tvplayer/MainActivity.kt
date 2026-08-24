@@ -347,7 +347,11 @@ class MainActivity : Activity() {
             findViewById<View>(R.id.homeNavChannels),
             findViewById<View>(R.id.homeNavMovies),
             findViewById<View>(R.id.homeNavSeries),
-        ).forEach { it.isFocusable = true; it.isClickable = true }
+        ).forEach { navItem ->
+            navItem.isFocusable = true
+            navItem.isClickable = true
+            navItem.setOnFocusChangeListener { view, hasFocus -> view.background = if (hasFocus) rounded(0x334CE8F0, 10f) else null }
+        }
         findViewById<View>(R.id.homeNavHome).setOnClickListener { showHome() }
         findViewById<View>(R.id.homeNavChannels).setOnClickListener { switchSection(MediaKind.LIVE) }
         findViewById<View>(R.id.homeNavMovies).setOnClickListener { switchSection(MediaKind.MOVIE) }
@@ -1033,11 +1037,80 @@ class MainActivity : Activity() {
         renderHomeHero()
     }
 
+    private var heroTypewriterRunnable: Runnable? = null
+    private var heroToneGenerator: android.media.ToneGenerator? = null
+
+    private fun stopHeroEffects() {
+        heroTypewriterRunnable?.let { mainHandler.removeCallbacks(it) }
+        heroTypewriterRunnable = null
+        runCatching { heroToneGenerator?.release() }
+        heroToneGenerator = null
+        homeHeroImage.clearAnimation()
+        homeHeroImage.animate().cancel()
+    }
+
     private fun renderHomeHero() {
         homeHeroImage.setImageResource(R.drawable.excellence_home_hero)
-        homeHeroTitle.text = "Aqui você encontra os melhores canais, filmes e séries"
+        startHeroBackgroundAnimation()
         homeHeroDescription.text = "Conteúdos selecionados para você assistir com qualidade e praticidade."
+        startHeroTypewriter("Aqui você encontra os melhores canais, filmes e séries")
         renderHomeFeaturedCards()
+    }
+
+    private fun startHeroBackgroundAnimation() {
+        homeHeroImage.clearAnimation()
+        homeHeroImage.scaleX = 1f
+        homeHeroImage.scaleY = 1f
+        homeHeroImage.translationX = 0f
+        // Efeito "Ken Burns": zoom e deslocamento lentos e continuos, dando
+        // sensacao de fundo vivo em vez de imagem estatica.
+        homeHeroImage.animate().cancel()
+        val zoom = android.animation.ObjectAnimator.ofFloat(homeHeroImage, "scaleX", 1f, 1.08f).apply {
+            duration = 12_000L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        val zoomY = android.animation.ObjectAnimator.ofFloat(homeHeroImage, "scaleY", 1f, 1.08f).apply {
+            duration = 12_000L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        val pan = android.animation.ObjectAnimator.ofFloat(homeHeroImage, "translationX", 0f, -30f).apply {
+            duration = 14_000L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        zoom.start(); zoomY.start(); pan.start()
+    }
+
+    // Escreve o titulo letra por letra, como numa maquina de escrever, com um
+    // clique curto e discreto a cada caractere (ToneGenerator, sem precisar
+    // de arquivo de audio).
+    private fun startHeroTypewriter(fullText: String) {
+        heroTypewriterRunnable?.let { mainHandler.removeCallbacks(it) }
+        homeHeroTitle.text = ""
+        var index = 0
+        val tone = runCatching {
+            android.media.ToneGenerator(android.media.AudioManager.STREAM_SYSTEM, 45).also { heroToneGenerator = it }
+        }.getOrNull()
+        val runnable = object : Runnable {
+            override fun run() {
+                if (index >= fullText.length) {
+                    tone?.release()
+                    heroToneGenerator = null
+                    return
+                }
+                index++
+                homeHeroTitle.text = fullText.substring(0, index)
+                val current = fullText[index - 1]
+                if (!current.isWhitespace()) {
+                    runCatching { tone?.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 12) }
+                }
+                mainHandler.postDelayed(this, 45L)
+            }
+        }
+        heroTypewriterRunnable = runnable
+        mainHandler.post(runnable)
     }
 
     private fun renderHomeFeaturedCards() {
@@ -1147,6 +1220,7 @@ class MainActivity : Activity() {
         stopMiniPlayer()
         selectedEntry = null
         clearPreviewForSection(kind)
+        stopHeroEffects()
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
@@ -1194,6 +1268,7 @@ class MainActivity : Activity() {
         clearPreviewForSection(MediaKind.LIVE)
         vodSection.visibility = View.GONE
         vodCards.removeAllViews()
+        stopHeroEffects()
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
@@ -3292,6 +3367,7 @@ class MainActivity : Activity() {
         radioMode = true
         voiceMode = false
         favoritesOnly = false
+        stopHeroEffects()
         homeMode = false
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
