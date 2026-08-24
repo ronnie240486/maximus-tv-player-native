@@ -15,6 +15,7 @@ class CatalogAdapter(
     private val fallbackLogo: (CatalogEntry) -> Int,
     private val onSelected: (CatalogEntry) -> Unit,
     private val onClicked: (CatalogEntry) -> Unit,
+    private val onLongClicked: (CatalogEntry) -> Unit,
 ) : RecyclerView.Adapter<CatalogAdapter.Holder>() {
     private var items: List<CatalogEntry> = emptyList()
     private var selectedKey: String? = null
@@ -97,6 +98,8 @@ class CatalogAdapter(
             if (hasFocus) onSelected(item)
         }
         holder.row.setOnClickListener { onClicked(item) }
+        holder.row.isLongClickable = true
+        holder.row.setOnLongClickListener { onLongClicked(item); true }
     }
 
     override fun getItemCount(): Int = items.size

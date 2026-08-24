@@ -903,6 +903,7 @@ class MainActivity : Activity() {
             fallbackLogo = ::fallbackLogo,
             onSelected = { selectEntry(it, false) },
             onClicked = { handleEntryClick(it) },
+            onLongClicked = { quickToggleFavorite(it) },
         )
         channelList.layoutManager = LinearLayoutManager(this)
         channelList.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
@@ -1205,12 +1206,13 @@ class MainActivity : Activity() {
             renderCategoryButtons(listOf("Todos") + radioRepository.categories())
             return
         }
+        val favoritesPill = if (favoritesOnly) emptyList() else listOf(FAVORITES_CATEGORY_LABEL)
         if (databaseBackedCatalog) {
             val requestKind = currentKind
             val requestId = ++categoryRequestId
             val cachedGroups = categoryCache[requestKind].orEmpty()
             categoryList.removeAllViews()
-            renderCategoryButtons(listOf("Todos") + cachedGroups)
+            renderCategoryButtons(favoritesPill + listOf("Todos") + cachedGroups)
             repository.queryGroups(requestKind, hiddenGroups(), includeAdult = true) { groups ->
                 runOnUiThread {
                     if (!databaseBackedCatalog || currentKind != requestKind || requestId != categoryRequestId) return@runOnUiThread
@@ -1219,14 +1221,14 @@ class MainActivity : Activity() {
                         normalizedGroups.filter { it == ContentSafety.LOCKED_CATEGORY }
                     if (freshGroups == cachedGroups) return@runOnUiThread
                     categoryCache[requestKind] = freshGroups
-                    if (selectedCategory != "Todos" && selectedCategory !in freshGroups) selectedCategory = "Todos"
-                    renderCategoryButtons(listOf("Todos") + freshGroups)
+                    if (selectedCategory != "Todos" && selectedCategory != FAVORITES_CATEGORY_LABEL && selectedCategory !in freshGroups) selectedCategory = "Todos"
+                    renderCategoryButtons(favoritesPill + listOf("Todos") + freshGroups)
                     if (currentFocus == null || isWithin(currentFocus, navItems)) categoryList.post { focusFirstCategory() }
                 }
             }
             return
         }
-        renderCategoryButtons(listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted())
+        renderCategoryButtons(favoritesPill + listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted())
     }
 
     private fun repaintCategorySelection() {
@@ -1309,16 +1311,17 @@ class MainActivity : Activity() {
         pageLoading = true
         val requestId = pageRequestId
         val offset = pagedItems.size
+        val favoritesPillActive = selectedCategory == FAVORITES_CATEGORY_LABEL
         repository.queryPage(
             kind = if (favoritesOnly) null else currentKind,
-            group = selectedCategory,
+            group = if (favoritesPillActive) "Todos" else selectedCategory,
             search = query,
             hidden = hiddenGroups(),
-            favorites = if (favoritesOnly) favorites() else emptySet(),
+            favorites = if (favoritesOnly || favoritesPillActive) favorites() else emptySet(),
             sortAlphabetically = sortAlphabetically,
             limit = pageSize,
             offset = offset,
-            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
+            seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly && !favoritesPillActive,
             includeAdult = parentalUnlocked,
         ) { page ->
             runOnUiThread {
@@ -1363,7 +1366,10 @@ class MainActivity : Activity() {
 
     private fun visibleItems(): List<CatalogEntry> {
         var result = currentItems()
-        if (selectedCategory != "Todos") {
+        if (selectedCategory == FAVORITES_CATEGORY_LABEL) {
+            val favKeys = favorites()
+            result = result.filter { it.key in favKeys }
+        } else if (selectedCategory != "Todos") {
             result = if (selectedCategory == ContentSafety.LOCKED_CATEGORY) {
                 result.filter { parentalUnlocked && ContentSafety.isAdult(it) }
             } else {
@@ -1485,16 +1491,17 @@ class MainActivity : Activity() {
         }
         if (databaseBackedCatalog) {
             val requestId = pageRequestId
+            val favoritesPillActive = selectedCategory == FAVORITES_CATEGORY_LABEL
             repository.queryPage(
                 kind = if (favoritesOnly) null else currentKind,
-                group = selectedCategory,
+                group = if (favoritesPillActive) "Todos" else selectedCategory,
                 search = query,
                 hidden = hiddenGroups(),
-                favorites = if (favoritesOnly) favorites() else emptySet(),
+                favorites = if (favoritesOnly || favoritesPillActive) favorites() else emptySet(),
                 sortAlphabetically = sortAlphabetically,
                 limit = 1,
                 offset = 0,
-                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly,
+                seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly && !favoritesPillActive,
                 includeAdult = parentalUnlocked,
                 ) { page ->
                 runOnUiThread { if (requestId == pageRequestId) page.firstOrNull()?.let { selectEntry(it, false) } }
@@ -3238,6 +3245,17 @@ class MainActivity : Activity() {
         getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putStringSet(PREF_FAVORITES, current).apply()
     }
 
+    // Atalho: segurar OK em cima de um item na lista favorita/desfavorita na
+    // hora, sem precisar navegar até o botão de favoritar no painel de
+    // detalhes.
+    private fun quickToggleFavorite(entry: CatalogEntry) {
+        val wasFavorite = entry.key in favorites()
+        toggleFavorite(entry)
+        Toast.makeText(this, if (wasFavorite) "Removido dos favoritos" else "★ Adicionado aos favoritos", Toast.LENGTH_SHORT).show()
+        if (selectedEntry?.key == entry.key) renderActions(entry)
+        if (selectedCategory == FAVORITES_CATEGORY_LABEL || favoritesOnly) renderCatalog()
+    }
+
     // Contagem de "assistido" por canal, guardada separada do catalogo (que e
     // apagado/reimportado periodicamente) para sobreviver a reimportacoes.
     // Chave estavel: CatalogEntry.key (tvg-id + streamUrl), que nao muda entre
@@ -3375,6 +3393,7 @@ class MainActivity : Activity() {
         private const val PREF_FAVORITES = "favorite_catalog_keys"
         private const val PREF_HIDDEN_GROUPS = "hidden_catalog_groups"
         private const val PREF_CHANNEL_WATCH_COUNTS = "channel_watch_counts"
+        private const val FAVORITES_CATEGORY_LABEL = "★ Favoritos"
         private const val PREF_SORT_ALPHA = "catalog_sort_alpha"
         private const val PREF_MAC_ADDRESS = "mac_address"
         private const val PREF_SERVER_API_URL = "server_api_url"
