@@ -688,12 +688,24 @@ class MainActivity : Activity() {
     }
 
     private fun focusSelectedCatalogItem(): Boolean {
-        val key = selectedEntry?.key
-        val item = (0 until channelList.childCount)
-            .map { channelList.getChildAt(it) }
-            .firstOrNull { key != null && it.tag == key }
-            ?: return false
-        return item.requestFocus()
+        val key = selectedEntry?.key ?: return false
+        val position = catalogAdapter.positionOf(key)
+        if (position < 0) return false
+        val attached = channelList.findViewHolderForAdapterPosition(position)?.itemView
+        if (attached != null) {
+            attached.isFocusable = true
+            return attached.requestFocus()
+        }
+        // O item existe na lista mas está fora da tela agora -- rola até ele
+        // sem voltar pro início, e foca assim que a view for criada.
+        channelList.scrollToPosition(position)
+        channelList.postDelayed({
+            channelList.findViewHolderForAdapterPosition(position)?.itemView?.let {
+                it.isFocusable = true
+                it.requestFocus()
+            }
+        }, 120L)
+        return true
     }
 
     private fun catalogRowForFocus(view: View): View? {
