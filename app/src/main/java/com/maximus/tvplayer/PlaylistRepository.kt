@@ -159,7 +159,7 @@ class PlaylistRepository(private val context: Context) {
         search: String,
         hidden: Set<String>,
         favorites: Set<String>,
-        sortAlphabetically: Boolean,
+        sortMode: SortMode,
         limit: Int,
         offset: Int,
         seriesOnly: Boolean = false,
@@ -167,7 +167,7 @@ class PlaylistRepository(private val context: Context) {
         callback: (List<CatalogEntry>) -> Unit,
     ) {
         executor.execute {
-            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortAlphabetically, limit, offset, seriesOnly, includeAdult) }.getOrDefault(emptyList()))
+            callback(runCatching { database.queryPage(kind, group, search, hidden, favorites, sortMode, limit, offset, seriesOnly, includeAdult) }.getOrDefault(emptyList()))
         }
     }
 

@@ -151,7 +151,7 @@ class MainActivity : Activity() {
     private var query = ""
     private var favoritesOnly = false
     private var currentKind = MediaKind.LIVE
-    private var sortAlphabetically = false
+    private var sortMode = SortMode.RECENT
     private var remoteBannerUrl = ""
     private var remoteEpgUrl = ""
     private var radioMode = false
@@ -260,7 +260,9 @@ class MainActivity : Activity() {
             )
         setContentView(R.layout.activity_main)
         catalogImportInProgress = intent.getBooleanExtra(EXTRA_CATALOG_IMPORT_IN_PROGRESS, false)
-        sortAlphabetically = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_SORT_ALPHA, false)
+        sortMode = runCatching {
+            SortMode.valueOf(getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getString(PREF_SORT_ALPHA, SortMode.RECENT.name) ?: SortMode.RECENT.name)
+        }.getOrDefault(SortMode.RECENT)
         bindViews()
         setupCatalogList()
         renderNavigation()
@@ -1400,7 +1402,7 @@ class MainActivity : Activity() {
             search = query,
             hidden = hiddenGroups(),
             favorites = if (favoritesOnly || favoritesPillActive) favorites() else emptySet(),
-            sortAlphabetically = sortAlphabetically,
+            sortMode = sortMode,
             limit = pageSize,
             offset = offset,
             seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly && !favoritesPillActive,
@@ -1481,7 +1483,7 @@ class MainActivity : Activity() {
                     item.tvgId.lowercase().contains(normalized)
             }
         }
-        return if (sortAlphabetically) result.sortedBy { it.name.lowercase() } else result
+        return if (sortMode == SortMode.ALPHABETICAL) result.sortedBy { it.name.lowercase() } else result
     }
 
     private fun remoteSyncEnabled(): Boolean = getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).getBoolean(PREF_REMOTE_SYNC, true)
@@ -1595,7 +1597,7 @@ class MainActivity : Activity() {
                 search = query,
                 hidden = hiddenGroups(),
                 favorites = if (favoritesOnly || favoritesPillActive) favorites() else emptySet(),
-                sortAlphabetically = sortAlphabetically,
+                sortMode = sortMode,
                 limit = 1,
                 offset = 0,
                 seriesOnly = currentKind == MediaKind.SERIES && !favoritesOnly && !favoritesPillActive,
@@ -2974,7 +2976,7 @@ class MainActivity : Activity() {
     private fun renderVodStrip() {
         vodCards.removeAllViews()
         if (!databaseBackedCatalog) { vodSection.visibility = View.GONE; return }
-        repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortAlphabetically, 4, 0, includeAdult = parentalUnlocked) { movies ->
+        repository.queryPage(MediaKind.MOVIE, "Todos", "", hiddenGroups(), emptySet(), sortMode, 4, 0, includeAdult = parentalUnlocked) { movies ->
             runOnUiThread {
                 // Não deixa a seção reservando espaço vazio (só o título, sem
                 // nenhum card) enquanto os filmes ainda não carregaram -- isso
@@ -3493,16 +3495,29 @@ class MainActivity : Activity() {
             setSingleLine(false)
             setText(hiddenGroups().joinToString(", "))
         }
-        val sortCheck = CheckBox(this).apply {
-            text = "Ordenar itens alfabeticamente"
-            isChecked = sortAlphabetically
+        val sortGroup = RadioGroup(this).apply { orientation = LinearLayout.VERTICAL }
+        val recentRadio = RadioButton(this).apply { text = "Mais recentes primeiro"; id = View.generateViewId() }
+        val alphaRadio = RadioButton(this).apply { text = "Ordem alfabética (A-Z)"; id = View.generateViewId() }
+        val ratingRadio = RadioButton(this).apply {
+            text = "Por nota (em breve, precisa do TMDB)"
+            id = View.generateViewId()
+            isEnabled = false
+        }
+        sortGroup.addView(recentRadio)
+        sortGroup.addView(alphaRadio)
+        sortGroup.addView(ratingRadio)
+        when (sortMode) {
+            SortMode.RECENT -> recentRadio.isChecked = true
+            SortMode.ALPHABETICAL -> alphaRadio.isChecked = true
+            SortMode.RATING -> recentRadio.isChecked = true
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(28, 0, 28, 0)
             addView(TextView(this@MainActivity).apply { text = "Grupos ocultos, separados por vírgula:" })
             addView(groupInput)
-            addView(sortCheck)
+            addView(TextView(this@MainActivity).apply { text = "Ordenar por:"; setPadding(0, 24, 0, 0) })
+            addView(sortGroup)
         }
         AlertDialog.Builder(this)
             .setTitle("Categorias e ordem")
@@ -3510,11 +3525,12 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("Salvar") { _, _ ->
                 val groups = groupInput.text.toString().split(",", "\\n").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+                val newSortMode = if (alphaRadio.isChecked) SortMode.ALPHABETICAL else SortMode.RECENT
                 getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit()
                     .putStringSet(PREF_HIDDEN_GROUPS, groups)
-                    .putBoolean(PREF_SORT_ALPHA, sortCheck.isChecked)
+                    .putString(PREF_SORT_ALPHA, newSortMode.name)
                     .apply()
-                sortAlphabetically = sortCheck.isChecked
+                sortMode = newSortMode
                 renderCategories()
                 renderCatalog()
                 selectFirstVisible()

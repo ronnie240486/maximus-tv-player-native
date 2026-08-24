@@ -6,6 +6,14 @@ enum class MediaKind {
     SERIES,
 }
 
+enum class SortMode(val label: String) {
+    RECENT("RECENTES"),
+    ALPHABETICAL("A-Z"),
+    // Nota (TMDB) ainda não disponível -- fica pra depois, quando tivermos a
+    // chave da API. Deixado aqui já para a UI conseguir mostrar desabilitado.
+    RATING("NOTA"),
+}
+
 data class CatalogEntry(
     val key: String,
     val name: String,
