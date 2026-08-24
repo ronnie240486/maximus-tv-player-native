@@ -93,7 +93,7 @@ class CatalogDatabase(context: Context) {
     fun replace(entries: Sequence<CatalogEntry>): Stats = replaceStreaming({ emit -> entries.forEach(emit) })
 
     fun clear() {
-        helper.writableDatabase.delete(TABLE, null, null)
+        runCatching { helper.writableDatabase.delete(TABLE, null, null) }
     }
 
     fun count(): Int = helper.readableDatabase.rawQuery("SELECT COUNT(*) FROM $TABLE", null).use { if (it.moveToFirst()) it.getInt(0) else 0 }
@@ -246,7 +246,19 @@ class CatalogDatabase(context: Context) {
         if (metadata.year.isNotBlank()) values.put("year", metadata.year)
         if (metadata.backdrop.isNotBlank()) values.put("backdrop_url", metadata.backdrop)
         if (metadata.trailer.isNotBlank()) values.put("trailer_url", metadata.trailer)
-        if (values.size() > 0) helper.writableDatabase.update(TABLE, values, "item_key=?", arrayOf(key))
+        if (values.size() <= 0) return
+        // Escrita "best effort": se a importação em segundo plano estiver
+        // segurando o único escritor do SQLite no momento (WAL permite leitura
+        // concorrente, mas não duas escritas ao mesmo tempo), essa chamada pode
+        // lançar SQLiteDatabaseLockedException. Perder um enriquecimento de
+        // metadados não deve NUNCA derrubar o app -- por isso nunca propaga.
+        val updated = runCatching { helper.writableDatabase.update(TABLE, values, "item_key=?", arrayOf(key)) }.getOrNull()
+        if (updated == null) {
+            // Uma segunda tentativa rápida cobre o caso comum de o lock durar
+            // só o tempo de um commit de lote da importação.
+            Thread.sleep(400)
+            runCatching { helper.writableDatabase.update(TABLE, values, "item_key=?", arrayOf(key)) }
+        }
     }
 
     fun close() = helper.close()

@@ -23,21 +23,21 @@
             android:id="@+id/sideNavigation"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="0.18"
+            android:layout_weight="0.13"
             android:background="#CC131525"
             android:clipChildren="false"
             android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:paddingStart="10dp"
-            android:paddingTop="20dp"
-            android:paddingEnd="10dp"
-            android:paddingBottom="16dp">
+            android:paddingStart="6dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="12dp">
 
             <ImageView
                 android:id="@+id/appLogo"
-                android:layout_width="76dp"
-                android:layout_height="76dp"
-                android:layout_marginBottom="6dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginBottom="4dp"
                 android:contentDescription="@null"
                 android:scaleType="centerInside"
                 android:src="@drawable/excellence_logo" />
@@ -46,20 +46,20 @@
                 android:id="@+id/brandMark"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:letterSpacing="0.12"
+                android:letterSpacing="0.04"
                 android:text="EXCELLENCE"
                 android:textColor="@color/cyan"
-                android:textSize="12sp"
+                android:textSize="9sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/brandSubtitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
+                android:layout_marginTop="2dp"
                 android:text="TV PLAYER"
                 android:textColor="@color/text_muted"
-                android:textSize="8sp" />
+                android:textSize="7sp" />
 
             <ScrollView
                 android:id="@+id/navScroll"
@@ -224,7 +224,7 @@
             android:id="@+id/previewScroll"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="0.35"
+            android:layout_weight="0.40"
             android:clipToPadding="false"
             android:fillViewport="true"
             android:paddingStart="18dp"
