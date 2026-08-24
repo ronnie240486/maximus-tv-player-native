@@ -1112,6 +1112,7 @@ class MainActivity : Activity() {
                     val normalizedGroups = groups.map { it.ifBlank { "Sem categoria" } }.distinct()
                     val freshGroups = normalizedGroups.filterNot { it == ContentSafety.LOCKED_CATEGORY }.sorted() +
                         normalizedGroups.filter { it == ContentSafety.LOCKED_CATEGORY }
+                    if (freshGroups == cachedGroups) return@runOnUiThread
                     categoryCache[requestKind] = freshGroups
                     if (selectedCategory != "Todos" && selectedCategory !in freshGroups) selectedCategory = "Todos"
                     renderCategoryButtons(listOf("Todos") + freshGroups)
@@ -1121,6 +1122,15 @@ class MainActivity : Activity() {
             return
         }
         renderCategoryButtons(listOf("Todos") + currentItems().map { it.groupTitle.ifBlank { "Sem categoria" } }.distinct().sorted())
+    }
+
+    private fun repaintCategorySelection() {
+        for (i in 0 until categoryList.childCount) {
+            val view = categoryList.getChildAt(i) as? TextView ?: continue
+            val category = view.text.toString()
+            view.setTextColor(if (category == selectedCategory) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+            view.background = rounded(if (category == selectedCategory) 0x334CE8F0 else 0x00111629, 18f)
+        }
     }
 
     private fun renderCategoryButtons(categories: List<String>) {
@@ -1143,7 +1153,7 @@ class MainActivity : Activity() {
                             clearPreviewForSection(currentKind)
                         }
                         selectedCategory = category
-                        renderCategories()
+                        repaintCategorySelection()
                         renderCatalog()
                         selectFirstVisible()
                     }
