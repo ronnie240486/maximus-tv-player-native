@@ -68,6 +68,8 @@ class MainActivity : Activity() {
     private lateinit var videoPreview: FrameLayout
     private lateinit var previewScroll: ScrollView
     private lateinit var categoryList: LinearLayout
+    private lateinit var sortRecentButton: TextView
+    private lateinit var sortAlphaButton: TextView
     private lateinit var navItems: LinearLayout
     private lateinit var appLogo: ImageView
     private lateinit var remoteBackground: ImageView
@@ -283,6 +285,11 @@ class MainActivity : Activity() {
         videoPreview = findViewById(R.id.videoPreview)
         previewScroll = findViewById(R.id.previewScroll)
         categoryList = findViewById(R.id.categoryList)
+        sortRecentButton = findViewById(R.id.sortRecentButton)
+        sortAlphaButton = findViewById(R.id.sortAlphaButton)
+        sortRecentButton.setOnClickListener { applySortMode(SortMode.RECENT) }
+        sortAlphaButton.setOnClickListener { applySortMode(SortMode.ALPHABETICAL) }
+        paintSortButtons()
         navItems = findViewById(R.id.navItems)
         searchHint = findViewById(R.id.searchHint)
         liveHeader = findViewById(R.id.liveHeader)
@@ -1324,6 +1331,25 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun paintSortButtons() {
+        listOf(sortRecentButton to SortMode.RECENT, sortAlphaButton to SortMode.ALPHABETICAL).forEach { (button, mode) ->
+            val active = sortMode == mode
+            button.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
+            button.background = rounded(if (active) 0x334CE8F0 else 0x14FFFFFF, 14f)
+        }
+    }
+
+    private fun applySortMode(mode: SortMode) {
+        if (sortMode == mode) return
+        sortMode = mode
+        getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_SORT_ALPHA, mode.name).apply()
+        paintSortButtons()
+        if (!radioMode) {
+            renderCatalog()
+            selectFirstVisible()
+        }
+    }
+
     private fun renderCategoryButtons(categories: List<String>) {
         categoryList.removeAllViews()
         categories.forEach { category ->
@@ -1422,11 +1448,6 @@ class MainActivity : Activity() {
                 }
                 pagedItems.addAll(page)
                 if (offset == 0) {
-                    // DIAGNOSTICO TEMPORARIO: esse branch (recarregar do zero) so
-                    // deveria rodar em troca de categoria/secao. Se aparecer durante
-                    // navegacao normal, confirma que algo dispara um recarregamento
-                    // completo inesperado, arrastando a rolagem de volta.
-                    Toast.makeText(this@MainActivity, "DIAG: lista recarregada do zero (${page.size} itens)", Toast.LENGTH_SHORT).show()
                     val layoutManager = channelList.layoutManager as? LinearLayoutManager
                     val anchorPosition = layoutManager?.findFirstVisibleItemPosition()?.takeIf { it != RecyclerView.NO_POSITION }
                     val anchorOffset = anchorPosition?.let { layoutManager.findViewByPosition(it)?.top }
@@ -1903,6 +1924,7 @@ class MainActivity : Activity() {
         } else {
             "▶  Assistir filme • ${entry.name}"
         }
+        if (selectedEntry?.key == entry.key) renderActions(entry)
     }
 
     private fun startEmbeddedTrailerPreview(entry: CatalogEntry, url: String) {
@@ -2139,10 +2161,7 @@ class MainActivity : Activity() {
         if (requestFocus) {
             channelList.post {
                 configureExplicitFocusGraph()
-                if (!focusSelectedCatalogItem()) {
-                    Toast.makeText(this, "DIAG: focusSelectedCatalogItem falhou, indo pro primeiro item", Toast.LENGTH_SHORT).show()
-                    focusFirstCatalogItem()
-                }
+                focusSelectedCatalogItem() || focusFirstCatalogItem()
             }
         } else {
             channelList.post { configureExplicitFocusGraph() }
@@ -2200,6 +2219,7 @@ class MainActivity : Activity() {
         val primaryLabel = when {
             isSeriesRoot && miniPlayerEntryKey == entry.key && previewMode == PreviewMode.TRAILER -> "☷  TEMPORADAS"
             isSeriesRoot -> "▶  REPRODUZIR SÉRIE"
+            entry.kind == MediaKind.MOVIE && miniPlayerEntryKey == entry.key && previewMode == PreviewMode.TRAILER -> "▶  ASSISTIR FILME"
             entry.kind == MediaKind.MOVIE -> "▶  TRAILER NO YOUTUBE"
             entry.kind == MediaKind.SERIES && entry.episode.isNotBlank() -> "▶  REPRODUZIR EPISÓDIO"
             else -> "▶  REPRODUZIR"
