@@ -2370,11 +2370,6 @@ class MainActivity : Activity() {
                     setOnFocusChangeListener { view, hasFocus -> view.background = rounded(if (hasFocus) 0x334CE8F0 else 0x14FFFFFF, 12f) }
                     setOnClickListener { dialog.dismiss(); openEntry(episode) }
                 }
-                val thumb = ImageView(this).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    layoutParams = LinearLayout.LayoutParams(dp(160), dp(90)).apply { marginEnd = dp(14) }
-                    background = rounded(0xFF10192B.toInt(), 8f)
-                }
                 val textCol = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
@@ -2397,7 +2392,6 @@ class MainActivity : Activity() {
                 }
                 textCol.addView(epTitleView)
                 textCol.addView(epSynopsisView)
-                card.addView(thumb)
                 card.addView(textCol)
                 episodeList.addView(card)
             }
