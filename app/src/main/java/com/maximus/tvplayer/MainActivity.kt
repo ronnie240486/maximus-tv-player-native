@@ -2139,8 +2139,17 @@ class MainActivity : Activity() {
     }
 
     private fun enrichEntryMetadata(entry: CatalogEntry) {
+        var answered = false
+        if (entry.synopsis.isBlank() && (entry.kind == MediaKind.MOVIE || entry.kind == MediaKind.SERIES)) {
+            mainHandler.postDelayed({
+                if (!answered && selectedEntry?.key == entry.key && detailDescription.text.toString() == "Buscando sinopse...") {
+                    detailDescription.text = "Sinopse não encontrada (${repository.lastMetadataDebug}). Buscando ainda em segundo plano..."
+                }
+            }, 15_000L)
+        }
         repository.enrichMetadata(entry) { metadata ->
             runOnUiThread {
+                answered = true
                 if (metadata != null && (metadata.synopsis.isNotBlank() || metadata.year.isNotBlank() || metadata.backdrop.isNotBlank() || metadata.trailer.isNotBlank())) {
                     enrichedMetadata[entry.key] = metadata
                 }
