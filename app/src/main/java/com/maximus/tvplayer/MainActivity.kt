@@ -126,7 +126,7 @@ class MainActivity : Activity() {
     private var miniTrailerView: WebView? = null
     private var radioVisualizer: RadioWaveView? = null
     private var previewMode = PreviewMode.NONE
-    private var previewScale = PreviewScale.NORMAL
+    private var previewScale = PreviewScale.ZOOM
     private var seriesSeasonsDialog: Dialog? = null
     private var seriesEpisodesDialog: Dialog? = null
 
@@ -347,7 +347,11 @@ class MainActivity : Activity() {
             findViewById<View>(R.id.homeNavChannels),
             findViewById<View>(R.id.homeNavMovies),
             findViewById<View>(R.id.homeNavSeries),
-        ).forEach { it.isFocusable = true; it.isClickable = true }
+        ).forEach { navItem ->
+            navItem.isFocusable = true
+            navItem.isClickable = true
+            navItem.setOnFocusChangeListener { view, hasFocus -> view.background = if (hasFocus) rounded(0x334CE8F0, 10f) else null }
+        }
         findViewById<View>(R.id.homeNavHome).setOnClickListener { showHome() }
         findViewById<View>(R.id.homeNavChannels).setOnClickListener { switchSection(MediaKind.LIVE) }
         findViewById<View>(R.id.homeNavMovies).setOnClickListener { switchSection(MediaKind.MOVIE) }
@@ -1033,11 +1037,80 @@ class MainActivity : Activity() {
         renderHomeHero()
     }
 
+    private var heroTypewriterRunnable: Runnable? = null
+    private var heroToneGenerator: android.media.ToneGenerator? = null
+
+    private fun stopHeroEffects() {
+        heroTypewriterRunnable?.let { mainHandler.removeCallbacks(it) }
+        heroTypewriterRunnable = null
+        runCatching { heroToneGenerator?.release() }
+        heroToneGenerator = null
+        homeHeroImage.clearAnimation()
+        homeHeroImage.animate().cancel()
+    }
+
     private fun renderHomeHero() {
         homeHeroImage.setImageResource(R.drawable.excellence_home_hero)
-        homeHeroTitle.text = "Aqui você encontra os melhores canais, filmes e séries"
+        startHeroBackgroundAnimation()
         homeHeroDescription.text = "Conteúdos selecionados para você assistir com qualidade e praticidade."
+        startHeroTypewriter("Aqui você encontra os melhores canais, filmes e séries")
         renderHomeFeaturedCards()
+    }
+
+    private fun startHeroBackgroundAnimation() {
+        homeHeroImage.clearAnimation()
+        homeHeroImage.scaleX = 1f
+        homeHeroImage.scaleY = 1f
+        homeHeroImage.translationX = 0f
+        // Efeito "Ken Burns": zoom e deslocamento lentos e continuos, dando
+        // sensacao de fundo vivo em vez de imagem estatica.
+        homeHeroImage.animate().cancel()
+        val zoom = android.animation.ObjectAnimator.ofFloat(homeHeroImage, "scaleX", 1f, 1.08f).apply {
+            duration = 12_000L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        val zoomY = android.animation.ObjectAnimator.ofFloat(homeHeroImage, "scaleY", 1f, 1.08f).apply {
+            duration = 12_000L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        val pan = android.animation.ObjectAnimator.ofFloat(homeHeroImage, "translationX", 0f, -30f).apply {
+            duration = 14_000L
+            repeatMode = android.animation.ValueAnimator.REVERSE
+            repeatCount = android.animation.ValueAnimator.INFINITE
+        }
+        zoom.start(); zoomY.start(); pan.start()
+    }
+
+    // Escreve o titulo letra por letra, como numa maquina de escrever, com um
+    // clique curto e discreto a cada caractere (ToneGenerator, sem precisar
+    // de arquivo de audio).
+    private fun startHeroTypewriter(fullText: String) {
+        heroTypewriterRunnable?.let { mainHandler.removeCallbacks(it) }
+        homeHeroTitle.text = ""
+        var index = 0
+        val tone = runCatching {
+            android.media.ToneGenerator(android.media.AudioManager.STREAM_SYSTEM, 45).also { heroToneGenerator = it }
+        }.getOrNull()
+        val runnable = object : Runnable {
+            override fun run() {
+                if (index >= fullText.length) {
+                    tone?.release()
+                    heroToneGenerator = null
+                    return
+                }
+                index++
+                homeHeroTitle.text = fullText.substring(0, index)
+                val current = fullText[index - 1]
+                if (!current.isWhitespace()) {
+                    runCatching { tone?.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 12) }
+                }
+                mainHandler.postDelayed(this, 45L)
+            }
+        }
+        heroTypewriterRunnable = runnable
+        mainHandler.post(runnable)
     }
 
     private fun renderHomeFeaturedCards() {
@@ -1147,6 +1220,7 @@ class MainActivity : Activity() {
         stopMiniPlayer()
         selectedEntry = null
         clearPreviewForSection(kind)
+        stopHeroEffects()
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
@@ -1194,6 +1268,7 @@ class MainActivity : Activity() {
         clearPreviewForSection(MediaKind.LIVE)
         vodSection.visibility = View.GONE
         vodCards.removeAllViews()
+        stopHeroEffects()
         homeMode = false
         homePanel.visibility = View.GONE
         findViewById<View>(R.id.sideNavigation).visibility = View.VISIBLE
@@ -1564,6 +1639,7 @@ class MainActivity : Activity() {
         } else {
             recordChannelWatch(entry)
             startMiniPlayer(entry)
+            expandMiniPlayer()
         }
     }
 
@@ -1606,11 +1682,12 @@ class MainActivity : Activity() {
             return
         }
         stopMiniPlayer()
-        previewScale = PreviewScale.NORMAL
+        previewScale = PreviewScale.ZOOM
         val playerView = PlayerView(this).apply {
             useController = false
             controllerShowTimeoutMs = 0
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             isClickable = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
             isFocusable = false
@@ -1814,7 +1891,7 @@ class MainActivity : Activity() {
         miniTrailerView = webView
         miniPlayerEntryKey = entry.key
         previewMode = PreviewMode.TRAILER
-        previewScale = PreviewScale.NORMAL
+        previewScale = PreviewScale.ZOOM
         showPreviewScaleControl()
         heroImage.visibility = View.GONE
         previewLogo.visibility = View.GONE
@@ -1994,7 +2071,7 @@ class MainActivity : Activity() {
         }
         radioVisualizer = null
         previewScaleButton.visibility = View.GONE
-        previewScale = PreviewScale.NORMAL
+        previewScale = PreviewScale.ZOOM
         miniPlayer?.release()
         miniPlayer = null
         miniPlayerEntryKey = null
@@ -3291,6 +3368,7 @@ class MainActivity : Activity() {
         radioMode = true
         voiceMode = false
         favoritesOnly = false
+        stopHeroEffects()
         homeMode = false
         seriesEpisodesDialog?.dismiss()
         seriesSeasonsDialog?.dismiss()
@@ -3346,23 +3424,56 @@ class MainActivity : Activity() {
         renderNavigation()
         val command = spoken.trim().lowercase(Locale.ROOT)
         when {
-            command.contains("rádio") || command.contains("radio") -> showRadioDialog()
-            command.contains("filme") -> switchSection(MediaKind.MOVIE)
-            command.contains("série") || command.contains("serie") -> switchSection(MediaKind.SERIES)
-            command.contains("canal") -> switchSection(MediaKind.LIVE)
-            command.contains("favorito") -> switchFavorites()
-            command.contains("início") || command.contains("inicio") || command.contains("home") -> showHome()
-            command.contains("buscar") || command.contains("pesquisar") -> showSearchDialog()
-            else -> {
-                query = spoken.trim()
-                searchHint.text = if (query.isBlank()) searchPlaceholder() else query
-                if (radioMode) showRadioDialog() else {
-                    renderCatalog()
-                    selectFirstVisible()
+            command.contains("rádio") || command.contains("radio") -> { showRadioDialog(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("filme") -> { switchSection(MediaKind.MOVIE); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("série") || command.contains("serie") -> { switchSection(MediaKind.SERIES); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("canal") -> { switchSection(MediaKind.LIVE); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("favorito") -> { switchFavorites(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("início") || command.contains("inicio") || command.contains("home") -> { showHome(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            command.contains("buscar") || command.contains("pesquisar") -> { showSearchDialog(); Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show() }
+            else -> openBySpokenName(spoken.trim())
+        }
+    }
+
+    // Diz um nome (canal, filme ou série) e o app abre direto, seja qual for a
+    // tela em que o usuário estiver -- busca nos três tipos de conteúdo de
+    // uma vez, não só na seção atual.
+    private fun openBySpokenName(spokenQuery: String) {
+        if (spokenQuery.isBlank()) return
+        if (!databaseBackedCatalog) {
+            query = spokenQuery
+            searchHint.text = query
+            if (radioMode) showRadioDialog() else { renderCatalog(); selectFirstVisible() }
+            Toast.makeText(this, "Comando: $spokenQuery", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val hidden = hiddenGroups()
+        val kinds = listOf(MediaKind.LIVE, MediaKind.MOVIE, MediaKind.SERIES)
+        val found = arrayOfNulls<CatalogEntry>(kinds.size)
+        var pending = kinds.size
+        fun finish() {
+            pending--
+            if (pending > 0) return
+            val match = found.firstNotNullOfOrNull { it }
+            if (match != null) {
+                switchSection(match.kind)
+                handleEntryClick(match)
+                Toast.makeText(this, "Abrindo \"${match.name}\"", Toast.LENGTH_SHORT).show()
+            } else {
+                query = spokenQuery
+                searchHint.text = query
+                if (radioMode) showRadioDialog() else { renderCatalog(); selectFirstVisible() }
+                Toast.makeText(this, "Nenhum resultado para \"$spokenQuery\"", Toast.LENGTH_SHORT).show()
+            }
+        }
+        kinds.forEachIndexed { index, kind ->
+            repository.queryPage(kind, "Todos", spokenQuery, hidden, emptySet(), false, 1, 0, includeAdult = parentalUnlocked) { results ->
+                runOnUiThread {
+                    found[index] = results.firstOrNull()
+                    finish()
                 }
             }
         }
-        Toast.makeText(this, "Comando: $spoken", Toast.LENGTH_SHORT).show()
     }
 
     private fun showCatalogRulesDialog() {
