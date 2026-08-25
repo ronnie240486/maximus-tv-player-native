@@ -352,6 +352,13 @@ class MainActivity : Activity() {
         homeMoviesCard = findViewById(R.id.homeMoviesCard)
         homeStreamingRow = findViewById(R.id.homeStreamingRow)
         renderHomeStreamingRow()
+        findViewById<View>(R.id.homeQuickCategories).setOnClickListener { switchSection(MediaKind.MOVIE) }
+        findViewById<View>(R.id.homeQuickStreamings).setOnClickListener { homeStreamingRow.getChildAt(0)?.requestFocus() }
+        findViewById<View>(R.id.homeQuickLaunches).setOnClickListener { openHomeQuickCategory(listOf("lançamento", "lancamento"), "Lançamentos") }
+        findViewById<View>(R.id.homeQuickPopular).setOnClickListener {
+            switchSection(MediaKind.MOVIE)
+            applySortMode(SortMode.RATING)
+        }
         homeSeriesCard = findViewById(R.id.homeSeriesCard)
         homeCartoonsCard = findViewById(R.id.homeCartoonsCard)
         homeMoviesCardImage = findViewById(R.id.homeMoviesCardImage)
@@ -1228,12 +1235,20 @@ class MainActivity : Activity() {
     }
 
     private fun openStreamingCategory(option: StreamingOption) {
+        openCategoryByKeywords(option.keywords, option.label)
+    }
+
+    private fun openHomeQuickCategory(keywords: List<String>, label: String) {
+        openCategoryByKeywords(keywords, label)
+    }
+
+    private fun openCategoryByKeywords(keywords: List<String>, label: String) {
         if (!databaseBackedCatalog) { Toast.makeText(this, "Catálogo ainda carregando, tente novamente em instantes.", Toast.LENGTH_SHORT).show(); return }
         val hidden = hiddenGroups()
         fun tryKind(kind: MediaKind, onMiss: () -> Unit) {
             repository.queryGroups(kind, hidden, includeAdult = false) { groups ->
                 runOnUiThread {
-                    val match = groups.firstOrNull { group -> option.keywords.any { keyword -> group.contains(keyword, ignoreCase = true) } }
+                    val match = groups.firstOrNull { group -> keywords.any { keyword -> group.contains(keyword, ignoreCase = true) } }
                     if (match != null) {
                         switchSection(kind, autoSelectFirst = false)
                         selectedCategory = match
@@ -1246,9 +1261,9 @@ class MainActivity : Activity() {
                 }
             }
         }
-        tryKind(MediaKind.SERIES) {
-            tryKind(MediaKind.MOVIE) {
-                Toast.makeText(this, "Nenhuma categoria de \"${option.label}\" encontrada no seu catálogo.", Toast.LENGTH_SHORT).show()
+        tryKind(MediaKind.MOVIE) {
+            tryKind(MediaKind.SERIES) {
+                Toast.makeText(this, "Nenhuma categoria de \"$label\" encontrada no seu catálogo.", Toast.LENGTH_SHORT).show()
             }
         }
     }
