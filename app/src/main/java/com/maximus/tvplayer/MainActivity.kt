@@ -2254,11 +2254,19 @@ class MainActivity : Activity() {
         miniPlayerDialog = null
         miniPlayerView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         miniPlayerView = null
-        miniTrailerView?.let {
-            (it.parent as? ViewGroup)?.removeView(it)
-            it.stopLoading()
-            it.loadUrl("about:blank")
-            it.destroy()
+        miniTrailerView?.let { webView ->
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            // destroy() de WebView pode travar a thread principal por um
+            // instante perceptivel em hardware mais fraco (TV box). A view ja
+            // foi removida da tela (o usuario nao ve mais ela), entao adia a
+            // parte pesada por um frame em vez de bloquear a troca de secao.
+            mainHandler.post {
+                runCatching {
+                    webView.stopLoading()
+                    webView.loadUrl("about:blank")
+                    webView.destroy()
+                }
+            }
         }
         miniTrailerView = null
         radioVisualizer?.let { visualizer ->
