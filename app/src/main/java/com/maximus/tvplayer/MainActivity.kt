@@ -152,6 +152,12 @@ class MainActivity : Activity() {
     private var selectedCategory = "Todos"
     private var query = ""
     private var favoritesOnly = false
+    // Suprime o "selecionar primeiro item se não achar o selecionado atual na
+    // página" de loadNextPage() -- usado quando estamos prestes a abrir um
+    // item especifico (comando de voz, card de destaque da Home) logo depois
+    // de trocar de seção, pra essa lógica de fallback não sobrescrever a
+    // seleção um instante depois.
+    private var suppressAutoSelectFirst = false
     private var currentKind = MediaKind.LIVE
     private var sortMode = SortMode.RECENT
     private var remoteBannerUrl = ""
@@ -382,7 +388,39 @@ class MainActivity : Activity() {
         videoPreview.setOnClickListener { selectedEntry?.let { handleEntryClick(it) } }
     }
 
+    private var dpadCenterLongPressHandled = false
+    private val dpadCenterLongPressRunnable = Runnable {
+        dpadCenterLongPressHandled = true
+        handleDpadCenterLongPress()
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BUTTON_A,
+            -> {
+                // Trata pressão longa manualmente: o app processava o toque no
+                // OK imediatamente ao pressionar (ACTION_DOWN), então o Android
+                // nunca tinha chance de detectar "segurou" (isso depende de
+                // observar o botão continuar pressionado até um tempo limite).
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN -> {
+                        if (event.repeatCount == 0) {
+                            dpadCenterLongPressHandled = false
+                            mainHandler.postDelayed(dpadCenterLongPressRunnable, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+                        }
+                        return true
+                    }
+                    KeyEvent.ACTION_UP -> {
+                        mainHandler.removeCallbacks(dpadCenterLongPressRunnable)
+                        if (!dpadCenterLongPressHandled) activateDpadTarget()
+                        return true
+                    }
+                }
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT,
@@ -390,11 +428,6 @@ class MainActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_UP,
                 KeyEvent.KEYCODE_DPAD_DOWN,
                 -> if (moveDpad(event.keyCode)) return true
-                KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_NUMPAD_ENTER,
-                KeyEvent.KEYCODE_BUTTON_A,
-                -> if (activateDpadTarget()) return true
                 KeyEvent.KEYCODE_BACK -> {
                     onBackPressed()
                     return true
@@ -402,6 +435,13 @@ class MainActivity : Activity() {
             }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun handleDpadCenterLongPress() {
+        val focused = currentFocus ?: return
+        if (isWithin(focused, channelList)) {
+            selectedEntry?.let { quickToggleFavorite(it) }
+        }
     }
 
     private fun activateDpadTarget(): Boolean {
@@ -506,19 +546,19 @@ class MainActivity : Activity() {
         if (isWithin(focused, previewScroll)) {
             if (isWithin(focused, nowCard)) {
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusLastAction() || videoPreview.requestFocus()
-                    KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
                     KeyEvent.KEYCODE_DPAD_RIGHT -> true
-                    KeyEvent.KEYCODE_DPAD_DOWN -> focusNextProgram() || true
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusNextProgram() || focusFirstAction() || true
                     else -> false
                 }
             }
             if (isWithin(focused, nextProgram)) {
                 return when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> focusLastAction() || nowCard.requestFocus()
-                    KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || nowCard.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_LEFT -> nowCard.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_UP -> nowCard.requestFocus()
                     KeyEvent.KEYCODE_DPAD_RIGHT -> true
-                    KeyEvent.KEYCODE_DPAD_DOWN -> true
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstAction() || true
                     else -> false
                 }
             }
@@ -527,16 +567,16 @@ class MainActivity : Activity() {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusLastAction() || videoPreview.requestFocus()
                     KeyEvent.KEYCODE_DPAD_UP -> focusLastAction() || videoPreview.requestFocus()
                     KeyEvent.KEYCODE_DPAD_RIGHT -> true
-                    KeyEvent.KEYCODE_DPAD_DOWN -> focusProgrammingArea() || true
+                    KeyEvent.KEYCODE_DPAD_DOWN -> true
                     else -> false
                 }
             }
             if (isWithin(focused, videoPreview)) {
                 return when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCategory()
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstAction() || focusProgrammingArea()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusFirstAction()
                     KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus()
-                    KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstAction() || previewScaleButton.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_DOWN -> focusProgrammingArea() || focusFirstAction() || previewScaleButton.requestFocus()
                     else -> false
                 }
             }
@@ -544,9 +584,9 @@ class MainActivity : Activity() {
                 val actionView = actionRow.indexOfChild(focused).takeIf { it >= 0 }
                 return when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> focusPreview()
-                    KeyEvent.KEYCODE_DPAD_UP -> videoPreview.requestFocus()
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusPreview() || true
-                    KeyEvent.KEYCODE_DPAD_DOWN -> actionView?.let { focusAction(it + 1) } ?: false || focusProgrammingArea() || true
+                    KeyEvent.KEYCODE_DPAD_UP -> focusProgrammingArea() || videoPreview.requestFocus()
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> focusPreview() || true
+                    KeyEvent.KEYCODE_DPAD_DOWN -> actionView?.let { focusAction(it + 1) } ?: false || detailDescription.requestFocus() || true
                     else -> false
                 }
             }
@@ -555,9 +595,9 @@ class MainActivity : Activity() {
             // default geometric algorithm send the user back to the sidebar.
             return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> focusSelectedCatalogItem() || focusFirstCategory() || true
-                KeyEvent.KEYCODE_DPAD_RIGHT -> focusFirstAction() || focusProgrammingArea() || true
+                KeyEvent.KEYCODE_DPAD_RIGHT -> focusProgrammingArea() || focusFirstAction() || true
                 KeyEvent.KEYCODE_DPAD_UP -> searchHint.requestFocus() || true
-                KeyEvent.KEYCODE_DPAD_DOWN -> focusFirstAction() || focusProgrammingArea() || true
+                KeyEvent.KEYCODE_DPAD_DOWN -> focusProgrammingArea() || focusFirstAction() || true
                 else -> false
             }
         }
@@ -1178,8 +1218,10 @@ class MainActivity : Activity() {
     }
 
     private fun openFeaturedEntry(entry: CatalogEntry) {
+        suppressAutoSelectFirst = true
         switchSection(entry.kind, autoSelectFirst = false)
         handleEntryClick(entry)
+        mainHandler.postDelayed({ suppressAutoSelectFirst = false }, 4_000L)
     }
 
     private fun clearPreviewForSection(kind: MediaKind) {
@@ -1460,7 +1502,7 @@ class MainActivity : Activity() {
                             layoutManager?.scrollToPositionWithOffset(anchorPosition, anchorOffset ?: 0)
                         }
                     }
-                    if (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key }) selectEntry(page.first(), false)
+                    if (!suppressAutoSelectFirst && (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key })) selectEntry(page.first(), false)
                     if (focusCatalogWhenReady) {
                         focusCatalogWhenReady = false
                         channelList.post { focusFirstCatalogItem() }
@@ -2164,7 +2206,8 @@ class MainActivity : Activity() {
                 if (!focusSelectedCatalogItem()) {
                     val key = selectedEntry?.key
                     val position = catalogAdapter.positionOf(key)
-                    Toast.makeText(this, "DIAG2: falhou (key=$key pos=$position itens=${catalogAdapter.itemCount})", Toast.LENGTH_LONG).show()
+                    val keySuffix = key?.takeLast(24) ?: "null"
+                    Toast.makeText(this, "DIAG2: pos=$position itens=${catalogAdapter.itemCount} key...$keySuffix", Toast.LENGTH_LONG).show()
                     focusFirstCatalogItem()
                 }
             }
@@ -3517,8 +3560,10 @@ class MainActivity : Activity() {
             if (pending > 0) return
             val match = found.firstNotNullOfOrNull { it }
             if (match != null) {
+                suppressAutoSelectFirst = true
                 switchSection(match.kind, autoSelectFirst = false)
                 handleEntryClick(match)
+                mainHandler.postDelayed({ suppressAutoSelectFirst = false }, 4_000L)
                 Toast.makeText(this, "Abrindo \"${match.name}\"", Toast.LENGTH_SHORT).show()
             } else {
                 query = spokenQuery
