@@ -259,13 +259,13 @@
                     android:id="@+id/sortRatingButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:alpha="0.4"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:paddingStart="10dp"
                     android:paddingTop="5dp"
                     android:paddingEnd="10dp"
                     android:paddingBottom="5dp"
-                    android:text="⭐ NOTA (em breve)"
-                    android:textColor="@color/text_muted"
+                    android:text="⭐ NOTA"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -332,7 +332,7 @@
                 <FrameLayout
                     android:id="@+id/videoPreview"
                     android:layout_width="match_parent"
-                    android:layout_height="280dp"
+                    android:layout_height="340dp"
                     android:background="@drawable/tv_banner"
                     android:clipChildren="true"
                     android:focusable="true">
@@ -464,7 +464,7 @@
                             android:layout_height="wrap_content"
                             android:text="NOW PLAYING"
                             android:textColor="@color/magenta"
-                            android:textSize="10sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
                         <TextView
@@ -473,7 +473,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="7dp"
                             android:textColor="@color/white"
-                            android:textSize="17sp"
+                            android:textSize="24sp"
                             android:textStyle="bold" />
 
                         <TextView
@@ -481,9 +481,9 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="5dp"
-                            android:lineSpacingExtra="2dp"
+                            android:lineSpacingExtra="3dp"
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="17sp" />
 
                         <LinearLayout
                             android:id="@+id/epgUpcoming"
@@ -498,7 +498,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
                             android:textColor="@color/text_muted"
-                            android:textSize="11sp" />
+                            android:textSize="15sp" />
                     </LinearLayout>
 
                     <TextView
@@ -507,7 +507,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
                         android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
+                        android:textSize="16sp" />
 
                     <LinearLayout
                         android:id="@+id/actionRow"
@@ -522,10 +522,10 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
-                        android:lineSpacingExtra="3dp"
+                        android:lineSpacingExtra="4dp"
                         android:paddingBottom="6dp"
                         android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
+                        android:textSize="16sp" />
 
                 </LinearLayout>
             </LinearLayout>
@@ -618,13 +618,13 @@
             <FrameLayout
                 android:id="@+id/homeHero"
                 android:layout_width="match_parent"
-                android:layout_height="300dp"
+                android:layout_height="340dp"
                 android:background="@drawable/tv_banner">
                 <ImageView
                     android:id="@+id/homeHeroImage"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:scaleType="centerCrop"
+                    android:scaleType="fitCenter"
                     android:src="@drawable/excellence_home_hero" />
                 <View
                     android:layout_width="match_parent"
@@ -816,6 +816,27 @@
                         </LinearLayout>
                     </FrameLayout>
                 </LinearLayout>
+            </HorizontalScrollView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="ESCOLHA SEU STREAMING"
+                android:textColor="@color/white"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="16dp"
+                android:scrollbars="horizontal">
+                <LinearLayout
+                    android:id="@+id/homeStreamingRow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
             </HorizontalScrollView>
         </LinearLayout>
     </ScrollView>
