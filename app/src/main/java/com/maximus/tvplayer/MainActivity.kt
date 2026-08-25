@@ -1172,35 +1172,57 @@ class MainActivity : Activity() {
     // Cores meramente decorativas (não são os logos reais das marcas, só uma
     // cor de fundo lembrando cada serviço) já que não temos os ícones oficiais
     // no projeto.
-    private data class StreamingOption(val label: String, val color: Long, val keywords: List<String>)
+    private data class StreamingOption(val label: String, val color: Long, val icon: String, val keywords: List<String>)
 
     private fun renderHomeStreamingRow() {
         homeStreamingRow.removeAllViews()
         val options = listOf(
-            StreamingOption("Netflix", 0xFFE50914, listOf("netflix")),
-            StreamingOption("Prime Video", 0xFF00A8E1, listOf("amazon", "prime")),
-            StreamingOption("Apple TV+", 0xFF1D1D1F, listOf("apple tv", "apple")),
-            StreamingOption("Disney+", 0xFF113CCF, listOf("disney")),
-            StreamingOption("HBO Max", 0xFF5B21B6, listOf("hbo", "max")),
-            StreamingOption("Crunchyroll", 0xFFF47521, listOf("crunchyroll")),
-            StreamingOption("Animes", 0xFF8B5CF6, listOf("anime")),
-            StreamingOption("Animações", 0xFF16A34A, listOf("animação", "animacao", "desenho", "infantil")),
+            StreamingOption("Disney+", 0xFF1DB4E8, "D+", listOf("disney")),
+            StreamingOption("Netflix", 0xFFE50914, "N", listOf("netflix")),
+            StreamingOption("Prime Video", 0xFF00A8E1, "PV", listOf("amazon", "prime")),
+            StreamingOption("Apple TV+", 0xFFAAAAAA, "TV", listOf("apple tv", "apple")),
+            StreamingOption("HBO Max", 0xFF8B5CF6, "HBO", listOf("hbo", "max")),
+            StreamingOption("Crunchyroll", 0xFFF47521, "CR", listOf("crunchyroll")),
+            StreamingOption("Animes", 0xFF8B5CF6, "AN", listOf("anime")),
+            StreamingOption("Animações", 0xFF16A34A, "★", listOf("animação", "animacao", "desenho", "infantil")),
         )
         options.forEach { option ->
-            val card = TextView(this).apply {
+            val circleSize = dp(76)
+            val innerSize = dp(66)
+            val badge = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(circleSize, circleSize)
+                background = ovalDrawable(option.color)
+            }
+            val inner = TextView(this).apply {
+                text = option.icon
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                background = ovalDrawable(0xFF0B0F1C)
+                layoutParams = FrameLayout.LayoutParams(innerSize, innerSize, Gravity.CENTER)
+            }
+            badge.addView(inner)
+            val caption = TextView(this).apply {
                 text = option.label
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                textSize = 13f
+                textSize = 12f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(0, dp(6), 0, 0)
+                layoutParams = LinearLayout.LayoutParams(dp(96), -2)
+            }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
                 isFocusable = true
                 isClickable = true
-                setPadding(dp(18), dp(14), dp(18), dp(14))
-                background = rounded(option.color, 12f)
-                layoutParams = LinearLayout.LayoutParams(dp(130), dp(56)).apply { marginEnd = dp(10) }
-                setOnFocusChangeListener { view, hasFocus -> view.scaleX = if (hasFocus) 1.06f else 1f; view.scaleY = if (hasFocus) 1.06f else 1f }
+                layoutParams = LinearLayout.LayoutParams(dp(96), -2).apply { marginEnd = dp(14) }
+                setOnFocusChangeListener { view, hasFocus -> view.scaleX = if (hasFocus) 1.1f else 1f; view.scaleY = if (hasFocus) 1.1f else 1f }
                 setOnClickListener { openStreamingCategory(option) }
             }
+            card.addView(badge)
+            card.addView(caption)
             homeStreamingRow.addView(card)
         }
     }
@@ -3973,6 +3995,11 @@ class MainActivity : Activity() {
     private fun rounded(color: Long, radius: Float): GradientDrawable = GradientDrawable().apply {
         setColor(Color.argb((color shr 24 and 0xFF).toInt(), (color shr 16 and 0xFF).toInt(), (color shr 8 and 0xFF).toInt(), (color and 0xFF).toInt()))
         cornerRadius = radius
+    }
+
+    private fun ovalDrawable(color: Long): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(Color.argb((color shr 24 and 0xFF).toInt(), (color shr 16 and 0xFF).toInt(), (color shr 8 and 0xFF).toInt(), (color and 0xFF).toInt()))
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
