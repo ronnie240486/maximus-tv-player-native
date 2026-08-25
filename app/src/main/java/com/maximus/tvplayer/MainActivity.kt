@@ -152,6 +152,12 @@ class MainActivity : Activity() {
     private var selectedCategory = "Todos"
     private var query = ""
     private var favoritesOnly = false
+    // Suprime o "selecionar primeiro item se não achar o selecionado atual na
+    // página" de loadNextPage() -- usado quando estamos prestes a abrir um
+    // item especifico (comando de voz, card de destaque da Home) logo depois
+    // de trocar de seção, pra essa lógica de fallback não sobrescrever a
+    // seleção um instante depois.
+    private var suppressAutoSelectFirst = false
     private var currentKind = MediaKind.LIVE
     private var sortMode = SortMode.RECENT
     private var remoteBannerUrl = ""
@@ -1178,8 +1184,10 @@ class MainActivity : Activity() {
     }
 
     private fun openFeaturedEntry(entry: CatalogEntry) {
+        suppressAutoSelectFirst = true
         switchSection(entry.kind, autoSelectFirst = false)
         handleEntryClick(entry)
+        mainHandler.postDelayed({ suppressAutoSelectFirst = false }, 4_000L)
     }
 
     private fun clearPreviewForSection(kind: MediaKind) {
@@ -1460,7 +1468,7 @@ class MainActivity : Activity() {
                             layoutManager?.scrollToPositionWithOffset(anchorPosition, anchorOffset ?: 0)
                         }
                     }
-                    if (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key }) selectEntry(page.first(), false)
+                    if (!suppressAutoSelectFirst && (selectedEntry == null || pagedItems.none { it.key == selectedEntry?.key })) selectEntry(page.first(), false)
                     if (focusCatalogWhenReady) {
                         focusCatalogWhenReady = false
                         channelList.post { focusFirstCatalogItem() }
@@ -3518,8 +3526,10 @@ class MainActivity : Activity() {
             if (pending > 0) return
             val match = found.firstNotNullOfOrNull { it }
             if (match != null) {
+                suppressAutoSelectFirst = true
                 switchSection(match.kind, autoSelectFirst = false)
                 handleEntryClick(match)
+                mainHandler.postDelayed({ suppressAutoSelectFirst = false }, 4_000L)
                 Toast.makeText(this, "Abrindo \"${match.name}\"", Toast.LENGTH_SHORT).show()
             } else {
                 query = spokenQuery
