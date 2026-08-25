@@ -1358,7 +1358,6 @@ class MainActivity : Activity() {
                         normalizedGroups.filter { it == ContentSafety.LOCKED_CATEGORY }
                     if (freshGroups == cachedGroups) return@runOnUiThread
                     categoryCache[requestKind] = freshGroups
-                    if (selectedCategory != "Todos" && selectedCategory != FAVORITES_CATEGORY_LABEL && selectedCategory !in freshGroups) selectedCategory = "Todos"
                     renderCategoryButtons(favoritesPill + listOf("Todos") + freshGroups)
                     if (currentFocus == null || isWithin(currentFocus, navItems)) categoryList.post { focusFirstCategory() }
                 }
@@ -3776,14 +3775,14 @@ class MainActivity : Activity() {
             val label = TextView(this).apply {
                 text = if (index == 0) "A SEGUIR" else "DEPOIS"
                 setTextColor(if (index == 0) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
-                textSize = 9f
+                textSize = 13f
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(dp(62), -2)
+                layoutParams = LinearLayout.LayoutParams(dp(88), -2)
             }
             val title = TextView(this).apply {
                 text = "${formatTime(program.start)}  •  ${program.title}"
                 setTextColor(Color.WHITE)
-                textSize = 11f
+                textSize = 15f
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
