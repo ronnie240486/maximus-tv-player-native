@@ -109,6 +109,7 @@ class MainActivity : Activity() {
     private lateinit var homeHeroTitle: TextView
     private lateinit var homeHeroDescription: TextView
     private lateinit var homeMoviesCard: FrameLayout
+    private lateinit var homeStreamingRow: LinearLayout
     private lateinit var homeSeriesCard: FrameLayout
     private lateinit var homeCartoonsCard: FrameLayout
     private lateinit var homeMoviesCardImage: ImageView
@@ -349,6 +350,8 @@ class MainActivity : Activity() {
         homeHeroTitle = findViewById(R.id.homeHeroTitle)
         homeHeroDescription = findViewById(R.id.homeHeroDescription)
         homeMoviesCard = findViewById(R.id.homeMoviesCard)
+        homeStreamingRow = findViewById(R.id.homeStreamingRow)
+        renderHomeStreamingRow()
         homeSeriesCard = findViewById(R.id.homeSeriesCard)
         homeCartoonsCard = findViewById(R.id.homeCartoonsCard)
         homeMoviesCardImage = findViewById(R.id.homeMoviesCardImage)
@@ -1164,6 +1167,68 @@ class MainActivity : Activity() {
         }
         heroTypewriterRunnable = runnable
         mainHandler.post(runnable)
+    }
+
+    // Cores meramente decorativas (não são os logos reais das marcas, só uma
+    // cor de fundo lembrando cada serviço) já que não temos os ícones oficiais
+    // no projeto.
+    private data class StreamingOption(val label: String, val color: Long, val keywords: List<String>)
+
+    private fun renderHomeStreamingRow() {
+        homeStreamingRow.removeAllViews()
+        val options = listOf(
+            StreamingOption("Netflix", 0xFFE50914, listOf("netflix")),
+            StreamingOption("Prime Video", 0xFF00A8E1, listOf("amazon", "prime")),
+            StreamingOption("Apple TV+", 0xFF1D1D1F, listOf("apple tv", "apple")),
+            StreamingOption("Disney+", 0xFF113CCF, listOf("disney")),
+            StreamingOption("HBO Max", 0xFF5B21B6, listOf("hbo", "max")),
+            StreamingOption("Crunchyroll", 0xFFF47521, listOf("crunchyroll")),
+            StreamingOption("Animes", 0xFF8B5CF6, listOf("anime")),
+            StreamingOption("Animações", 0xFF16A34A, listOf("animação", "animacao", "desenho", "infantil")),
+        )
+        options.forEach { option ->
+            val card = TextView(this).apply {
+                text = option.label
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                isFocusable = true
+                isClickable = true
+                setPadding(dp(18), dp(14), dp(18), dp(14))
+                background = rounded(option.color, 12f)
+                layoutParams = LinearLayout.LayoutParams(dp(130), dp(56)).apply { marginEnd = dp(10) }
+                setOnFocusChangeListener { view, hasFocus -> view.scaleX = if (hasFocus) 1.06f else 1f; view.scaleY = if (hasFocus) 1.06f else 1f }
+                setOnClickListener { openStreamingCategory(option) }
+            }
+            homeStreamingRow.addView(card)
+        }
+    }
+
+    private fun openStreamingCategory(option: StreamingOption) {
+        if (!databaseBackedCatalog) { Toast.makeText(this, "Catálogo ainda carregando, tente novamente em instantes.", Toast.LENGTH_SHORT).show(); return }
+        val hidden = hiddenGroups()
+        fun tryKind(kind: MediaKind, onMiss: () -> Unit) {
+            repository.queryGroups(kind, hidden, includeAdult = false) { groups ->
+                runOnUiThread {
+                    val match = groups.firstOrNull { group -> option.keywords.any { keyword -> group.contains(keyword, ignoreCase = true) } }
+                    if (match != null) {
+                        switchSection(kind, autoSelectFirst = false)
+                        selectedCategory = match
+                        renderCategories()
+                        renderCatalog()
+                        selectFirstVisible()
+                    } else {
+                        onMiss()
+                    }
+                }
+            }
+        }
+        tryKind(MediaKind.SERIES) {
+            tryKind(MediaKind.MOVIE) {
+                Toast.makeText(this, "Nenhuma categoria de \"${option.label}\" encontrada no seu catálogo.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun renderHomeFeaturedCards() {
