@@ -70,6 +70,7 @@ class MainActivity : Activity() {
     private lateinit var categoryList: LinearLayout
     private lateinit var sortRecentButton: TextView
     private lateinit var sortAlphaButton: TextView
+    private lateinit var sortRatingButton: TextView
     private lateinit var navItems: LinearLayout
     private lateinit var appLogo: ImageView
     private lateinit var remoteBackground: ImageView
@@ -158,6 +159,7 @@ class MainActivity : Activity() {
     // de trocar de seção, pra essa lógica de fallback não sobrescrever a
     // seleção um instante depois.
     private var suppressAutoSelectFirst = false
+    private var ratingSortRequestId = 0
     private var currentKind = MediaKind.LIVE
     private var sortMode = SortMode.RECENT
     private var remoteBannerUrl = ""
@@ -293,8 +295,10 @@ class MainActivity : Activity() {
         categoryList = findViewById(R.id.categoryList)
         sortRecentButton = findViewById(R.id.sortRecentButton)
         sortAlphaButton = findViewById(R.id.sortAlphaButton)
+        sortRatingButton = findViewById(R.id.sortRatingButton)
         sortRecentButton.setOnClickListener { applySortMode(SortMode.RECENT) }
         sortAlphaButton.setOnClickListener { applySortMode(SortMode.ALPHABETICAL) }
+        sortRatingButton.setOnClickListener { applySortMode(SortMode.RATING) }
         paintSortButtons()
         navItems = findViewById(R.id.navItems)
         searchHint = findViewById(R.id.searchHint)
@@ -1374,7 +1378,7 @@ class MainActivity : Activity() {
     }
 
     private fun paintSortButtons() {
-        listOf(sortRecentButton to SortMode.RECENT, sortAlphaButton to SortMode.ALPHABETICAL).forEach { (button, mode) ->
+        listOf(sortRecentButton to SortMode.RECENT, sortAlphaButton to SortMode.ALPHABETICAL, sortRatingButton to SortMode.RATING).forEach { (button, mode) ->
             val active = sortMode == mode
             button.setTextColor(if (active) Color.rgb(76, 232, 240) else Color.rgb(170, 177, 199))
             button.background = rounded(if (active) 0x334CE8F0 else 0x14FFFFFF, 14f)
@@ -1386,9 +1390,50 @@ class MainActivity : Activity() {
         sortMode = mode
         getSharedPreferences(ActivationActivity.PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_SORT_ALPHA, mode.name).apply()
         paintSortButtons()
-        if (!radioMode) {
+        if (mode == SortMode.RATING) {
+            applyRatingSort()
+        } else if (!radioMode) {
             renderCatalog()
             selectFirstVisible()
+        }
+    }
+
+    // "Nota" não dá pra ordenar o catálogo inteiro (o TMDB é uma API externa
+    // buscada por nome, um item de cada vez -- inviável para catálogos com
+    // dezenas/centenas de milhares de itens). Em vez disso, busca um lote já
+    // carregável de itens, pega a nota de cada um, e mostra ordenado por nota
+    // -- fora do sistema normal de paginação incremental (que já sofreu bugs
+    // de posição de rolagem antes; essa ação é um resultado fixo/único, não
+    // uma lista que cresce ao rolar).
+    private fun applyRatingSort() {
+        if (!databaseBackedCatalog) { Toast.makeText(this, "Ordenar por nota não disponível para esta lista.", Toast.LENGTH_SHORT).show(); return }
+        Toast.makeText(this, "Buscando notas no TMDB...", Toast.LENGTH_SHORT).show()
+        val hidden = hiddenGroups()
+        val requestId = ++ratingSortRequestId
+        repository.queryPage(currentKind, selectedCategory, query, hidden, emptySet(), SortMode.RECENT, 60, 0, seriesOnly = currentKind == MediaKind.SERIES, includeAdult = parentalUnlocked) { batch ->
+            runOnUiThread {
+                if (requestId != ratingSortRequestId || batch.isEmpty()) return@runOnUiThread
+                val rated = arrayOfNulls<Pair<CatalogEntry, Double>>(batch.size)
+                var pending = batch.size
+                batch.forEachIndexed { index, item ->
+                    repository.fetchTmdbRating(item) { rating ->
+                        runOnUiThread {
+                            if (requestId != ratingSortRequestId) return@runOnUiThread
+                            rated[index] = item to (rating?.score ?: -1.0)
+                            pending--
+                            if (pending == 0) {
+                                val sorted = rated.filterNotNull().sortedByDescending { it.second }.map { it.first }
+                                pagedItems.clear()
+                                pagedItems.addAll(sorted)
+                                pageFinished = true
+                                catalogAdapter.submit(sorted, selectedEntry?.key)
+                                channelList.scrollToPosition(0)
+                                if (sorted.isNotEmpty()) selectEntry(sorted.first(), false)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2150,7 +2195,7 @@ class MainActivity : Activity() {
             if (requestFocus) requestAdultAccess { selectEntry(entry, true) }
             return
         }
-        if (selectedEntry?.key != entry.key) stopMiniPlayer()
+        if (requestFocus && selectedEntry?.key != entry.key) stopMiniPlayer()
         selectedEntry = entry
         if (::catalogAdapter.isInitialized) catalogAdapter.setSelectedKey(entry.key)
         val editorial = editorialFor(entry)

@@ -259,13 +259,13 @@
                     android:id="@+id/sortRatingButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:alpha="0.4"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:paddingStart="10dp"
                     android:paddingTop="5dp"
                     android:paddingEnd="10dp"
                     android:paddingBottom="5dp"
-                    android:text="⭐ NOTA (em breve)"
-                    android:textColor="@color/text_muted"
+                    android:text="⭐ NOTA"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -332,7 +332,7 @@
                 <FrameLayout
                     android:id="@+id/videoPreview"
                     android:layout_width="match_parent"
-                    android:layout_height="280dp"
+                    android:layout_height="340dp"
                     android:background="@drawable/tv_banner"
                     android:clipChildren="true"
                     android:focusable="true">
